@@ -1,0 +1,18 @@
+[package]
+name = "pidgin-wechat"
+version = "0.1.0"
+authors = ["石博文 <sbw@sbw.so>"]
+
+[lib]
+name = "wechat"
+path = "src/wechat.rs"
+crate-type = ["dylib"]
+
+[dependencies]
+libc = "*"
+glib-sys = "*"
+purple-sys = { path = "purple-sys" }
+lazy_static = "*"
+hyper = "*"
+hyper-native-tls = "*"
+regex = "*"
