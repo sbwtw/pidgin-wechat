@@ -1,12 +1,11 @@
 [package]
 name = "purple-sys"
-version = "0.1.0"
-authors = ["Jack Coulter <jscinoz@jscinoz.so>"]
-keywords = ["pidgin", "purple", "libpurple"]
+version = "0.0.1"
+authors = ["石博文 <sbw@sbw.so>"]
 build = "build.rs"
 links = "purple"
 
 [build-dependencies]
 pkg-config = "*"
 libc = "*"
-bindgen = "*"
+bindgen = "~0.21.2"

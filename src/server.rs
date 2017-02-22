@@ -25,13 +25,18 @@ use std::fs::{File, OpenOptions};
 lazy_static!{
     pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
-    static ref CHANNEL: (Mutex<Sender<Message>>, Mutex<Receiver<Message>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
+    static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     static ref WECHAT: Mutex<Wechat> = Mutex::new(Wechat::new());
 }
 
 #[derive(Debug)]
-pub enum Message {
+pub enum SrvMsg {
     ShowVerifyImage(String),
+}
+
+#[derive(Debug)]
+pub enum CltMsg {
+    SendMsg,
 }
 
 struct Wechat {
@@ -54,7 +59,7 @@ impl Wechat {
 
         let file_path = self.save_qr_file(uuid);
 
-        CHANNEL.0.lock().unwrap().send(Message::ShowVerifyImage(file_path)).unwrap();
+        SRV_MSG.0.lock().unwrap().send(SrvMsg::ShowVerifyImage(file_path)).unwrap();
     }
 
     fn get_uuid(&mut self) -> String {
@@ -100,13 +105,13 @@ impl Wechat {
 
 unsafe extern "C" fn t(ptr: *mut c_void) -> c_int {
 
-    let rx = CHANNEL.1.lock().unwrap();
+    let rx = SRV_MSG.1.lock().unwrap();
 
     if let Ok(m) = rx.try_recv() {
         debug(format!("GOT: {:#?}", m));
 
         match m {
-            Message::ShowVerifyImage(path) => show_verify_image(path),
+            SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
         }
     }
 
