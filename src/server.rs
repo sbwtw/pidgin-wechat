@@ -5,6 +5,7 @@ extern crate hyper_native_tls;
 extern crate regex;
 
 use self::hyper::Client;
+use self::hyper::header::SetCookie;
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
@@ -21,12 +22,19 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::cell::Cell;
 use std::marker::Copy;
 use std::fs::{File, OpenOptions};
+use std::thread;
+use std::fmt::Debug;
 
 lazy_static!{
     pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
     static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
-    static ref WECHAT: Mutex<Wechat> = Mutex::new(Wechat::new());
+    static ref CLT_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
+    static ref CLIENT: Client = {
+        let ssl = NativeTlsClient::new().unwrap();
+        let connector = HttpsConnector::new(ssl);
+        Client::with_connector(connector)
+    };
 }
 
 #[derive(Debug)]
@@ -39,71 +47,87 @@ pub enum CltMsg {
     SendMsg,
 }
 
-struct Wechat {
-    client: Client,
+pub fn start_login() {
+
+    let uuid = get_uuid();
+    let file_path = save_qr_file(&uuid);
+
+    // start check login thread
+    thread::spawn(|| { check_scan(uuid); });
+
+    SRV_MSG.0.lock().unwrap().send(SrvMsg::ShowVerifyImage(file_path)).unwrap();
 }
 
-impl Wechat {
-    pub fn new() -> Wechat {
+fn check_scan(uuid: String) {
+    let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+                      uuid,
+                      1);
 
-        let ssl = NativeTlsClient::new().unwrap();
-        let connector = HttpsConnector::new(ssl);
-        let client = Client::with_connector(connector);
+    let result = get(&url);
 
-        Wechat { client: client }
-    }
+    let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+                      uuid,
+                      0);
 
-    fn login(&mut self) {
+    // window.code=200;
+    // window.redirect_uri="https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage?ticket=Au1vqm4uwpWOIQUCx-bMtOjT@qrticket_0&uuid=oZYNmWV5SQ==&lang=zh_CN&scan=1487767062";
+    let result = get(&url);
+    let reg = Regex::new(r#"redirect_uri="([^"]+)""#).unwrap();
+    let caps = reg.captures(&result).unwrap();
+    let uri = caps.get(1).unwrap().as_str();
 
-        let uuid = self.get_uuid();
+    // webwxnewloginpage
+    let url = format!("{}&fun=new", uri);
+    let result = get(&url);
+    // <error><ret>0</ret><message></message><skey>@crypt_fda0f7ab_065fa61edb3c8b337c04438e26ddd5dd</skey><wxsid>qZlrjeHE734c6IKE</wxsid><wxuin>1876132353</wxuin><pass_ticket>7eBV%2Fm4GgjOY5wPJgWTZ%2F2%2F601Bc68TdTxmAPxprm2M0PYUdVMD59AkPmOAyXDGo</pass_ticket><isgrayscale>1</isgrayscale></error>
 
-        let file_path = self.save_qr_file(uuid);
 
-        SRV_MSG.0.lock().unwrap().send(SrvMsg::ShowVerifyImage(file_path)).unwrap();
-    }
-
-    fn get_uuid(&mut self) -> String {
-        let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb";
-        let mut response = self.client.get(url).send().unwrap();
-        let mut result = String::new();
-        response.read_to_string(&mut result);
-
-        let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
-        let caps = reg.captures(&result).unwrap();
-
-        caps.get(1).unwrap().as_str().to_owned()
-    }
-
-    fn save_qr_file<T: AsRef<str>>(&mut self, url: T) -> String {
-        let url = format!("https://login.weixin.qq.com/qrcode/{}", url.as_ref());
-        let mut response = self.client.get(&url).send().unwrap();
-        let mut result = Vec::new();
-        let size = response.read_to_end(&mut result).unwrap();
-
-        let mut s = String::new();
-        s.push_str("aaa");
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open("/tmp/qr.png")
-            .unwrap();
-        let size = file.write(&result).unwrap();
-        file.flush();
-
-        "/tmp/qr.png".to_owned()
-    }
-
-    fn get<T: AsRef<str>>(&mut self, url: T) -> String {
-        let mut response = self.client.get(url.as_ref()).send().unwrap();
-        let mut result = String::new();
-        response.read_to_string(&mut result);
-
-        result
-    }
 }
 
-unsafe extern "C" fn t(ptr: *mut c_void) -> c_int {
+fn get_uuid() -> String {
+    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb";
+    let mut response = CLIENT.get(url).send().unwrap();
+    let mut result = String::new();
+    response.read_to_string(&mut result);
+
+    let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
+    let caps = reg.captures(&result).unwrap();
+
+    caps.get(1).unwrap().as_str().to_owned()
+}
+
+fn save_qr_file<T: AsRef<str>>(url: T) -> String {
+    let url = format!("https://login.weixin.qq.com/qrcode/{}", url.as_ref());
+    let mut response = CLIENT.get(&url).send().unwrap();
+    let mut result = Vec::new();
+    let size = response.read_to_end(&mut result).unwrap();
+
+    let mut s = String::new();
+    s.push_str("aaa");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open("/tmp/qr.png")
+        .unwrap();
+    let size = file.write(&result).unwrap();
+    file.flush();
+
+    "/tmp/qr.png".to_owned()
+}
+
+fn get<T: AsRef<str> + Debug>(url: T) -> String {
+
+    println!("get: {:?}", url);
+    let mut response = CLIENT.get(url.as_ref()).send().unwrap();
+    let mut result = String::new();
+    response.read_to_string(&mut result);
+    println!("result: {}", result);
+
+    result
+}
+
+unsafe extern "C" fn check_srv(ptr: *mut c_void) -> c_int {
 
     let rx = SRV_MSG.1.lock().unwrap();
 
@@ -121,10 +145,10 @@ unsafe extern "C" fn t(ptr: *mut c_void) -> c_int {
 pub fn login() {
 
     unsafe {
-        purple_timeout_add(1000, Some(t), null_mut());
+        purple_timeout_add(1000, Some(check_srv), null_mut());
     }
 
-    std::thread::spawn(|| { WECHAT.lock().unwrap().login(); });
+    std::thread::spawn(|| { start_login(); });
 }
 
 pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
