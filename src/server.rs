@@ -3,12 +3,15 @@ extern crate std;
 extern crate hyper;
 extern crate hyper_native_tls;
 extern crate regex;
+#[macro_use()]
+extern crate serde_json;
 
 use self::hyper::Client;
-use self::hyper::header::SetCookie;
+use self::hyper::header::{SetCookie, Cookie, Header, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
+use self::serde_json::Value;
 use plugin_pointer::*;
 use util::*;
 use purple_sys::*;
@@ -24,12 +27,14 @@ use std::marker::Copy;
 use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 lazy_static!{
     pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
     static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
-    static ref CLT_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
+    static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
+    static ref WECHAT: RwLock<WeChat> = RwLock::new(WeChat::new());
     static ref CLIENT: Client = {
         let ssl = NativeTlsClient::new().unwrap();
         let connector = HttpsConnector::new(ssl);
@@ -45,6 +50,50 @@ pub enum SrvMsg {
 #[derive(Debug)]
 pub enum CltMsg {
     SendMsg,
+}
+
+struct WeChat {
+    uin: String,
+    sid: String,
+    skey: String,
+    device_id: String,
+    headers: Headers,
+}
+
+unsafe impl std::marker::Sync for WeChat {}
+
+impl WeChat {
+    fn new() -> WeChat {
+        let mut headers = Headers::new();
+        headers.set_raw("Cookie", vec![b"".to_vec()]);
+        headers.set_raw("ContentType",
+                        vec![b"application/json; charset=UTF-8".to_vec()]);
+        headers.set_raw("Host", vec![b"web.wechat.com".to_vec()]);
+        headers.set_raw("Referer",
+                        vec![b"https://web.wechat.com/?&lang=zh_CN".to_vec()]);
+        headers.set_raw("Accept",
+                        vec![b"application/json, text/plain, */*".to_vec()]);
+
+        WeChat {
+            uin: String::new(),
+            sid: String::new(),
+            skey: String::new(),
+            device_id: String::new(),
+            headers: headers,
+        }
+    }
+
+    fn set_cookies(&mut self, cookies: &SetCookie) {
+        let mut jar = self.headers.get_mut::<Cookie>().unwrap();
+        for c in cookies.iter() {
+            let i = c.split(';').next().unwrap();
+            jar.push(i.to_owned());
+        }
+    }
+
+    fn headers(&self) -> Headers {
+        self.headers.clone()
+    }
 }
 
 pub fn start_login() {
@@ -78,17 +127,47 @@ fn check_scan(uuid: String) {
 
     // webwxnewloginpage
     let url = format!("{}&fun=new", uri);
-    let result = get(&url);
-    // <error><ret>0</ret><message></message><skey>@crypt_fda0f7ab_065fa61edb3c8b337c04438e26ddd5dd</skey><wxsid>qZlrjeHE734c6IKE</wxsid><wxuin>1876132353</wxuin><pass_ticket>7eBV%2Fm4GgjOY5wPJgWTZ%2F2%2F601Bc68TdTxmAPxprm2M0PYUdVMD59AkPmOAyXDGo</pass_ticket><isgrayscale>1</isgrayscale></error>
+    let mut response = CLIENT.get(&url).send().unwrap();
+    let mut result = String::new();
+    response.read_to_string(&mut result).unwrap();
+    let cookies = response.headers.get::<SetCookie>().unwrap();
 
+    let skey = regex_cap(&result, r#"<skey>(.*)</skey>"#);
+    let sid = regex_cap(&result, r#"<wxsid>(.*)</wxsid>"#);
+    let uin = regex_cap(&result, r#"<wxuin>(.*)</wxuin>"#);
+    let pass_ticket = regex_cap(&result, r#"<pass_ticket>(.*)</pass_ticket>"#);
 
+    {
+        let mut wechat = WECHAT.write().unwrap();
+        wechat.set_cookies(&cookies);
+    }
+
+    // init
+    let data = format!("{{ \"BaseRequest\": {{ \"Uin\": \"{}\", \"Sid\": \"{}\", \"Skey\": \
+                        \"{}\", \"DeviceID\": \"{}\" }} }}",
+                       uin,
+                       sid,
+                       skey,
+                       "");
+    let url = format!("https://web.wechat.\
+                       com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
+                      pass_ticket,
+                      skey);
+    let result = post(&url, &data).parse::<Value>().unwrap();
+}
+
+fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
+    let reg = Regex::new(r).unwrap();
+    let caps = reg.captures(&c).unwrap();
+
+    caps.get(1).unwrap().as_str()
 }
 
 fn get_uuid() -> String {
     let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb";
     let mut response = CLIENT.get(url).send().unwrap();
     let mut result = String::new();
-    response.read_to_string(&mut result);
+    response.read_to_string(&mut result).unwrap();
 
     let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
@@ -100,7 +179,7 @@ fn save_qr_file<T: AsRef<str>>(url: T) -> String {
     let url = format!("https://login.weixin.qq.com/qrcode/{}", url.as_ref());
     let mut response = CLIENT.get(&url).send().unwrap();
     let mut result = Vec::new();
-    let size = response.read_to_end(&mut result).unwrap();
+    response.read_to_end(&mut result).unwrap();
 
     let mut s = String::new();
     s.push_str("aaa");
@@ -110,8 +189,7 @@ fn save_qr_file<T: AsRef<str>>(url: T) -> String {
         .truncate(true)
         .open("/tmp/qr.png")
         .unwrap();
-    let size = file.write(&result).unwrap();
-    file.flush();
+    file.write(&result).unwrap();
 
     "/tmp/qr.png".to_owned()
 }
@@ -119,15 +197,32 @@ fn save_qr_file<T: AsRef<str>>(url: T) -> String {
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
     println!("get: {:?}", url);
-    let mut response = CLIENT.get(url.as_ref()).send().unwrap();
+    let mut response =
+        CLIENT.get(url.as_ref()).headers(WECHAT.read().unwrap().headers()).send().unwrap();
     let mut result = String::new();
-    response.read_to_string(&mut result);
+    response.read_to_string(&mut result).unwrap();
     println!("result: {}", result);
 
     result
 }
 
-unsafe extern "C" fn check_srv(ptr: *mut c_void) -> c_int {
+fn post<U: AsRef<str> + Debug, D: AsRef<str> + Debug>(url: U, data: D) -> String {
+
+    let headers = WECHAT.read().unwrap().headers();
+    println!("get: {:?}\nheaders:{:?}\npost_data: {:?}",
+             url,
+             headers,
+             data);
+    let mut response =
+        CLIENT.post(url.as_ref()).headers(headers).body(data.as_ref()).send().unwrap();
+    let mut result = String::new();
+    response.read_to_string(&mut result).unwrap();
+    println!("result: {}", result);
+
+    result
+}
+
+unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
     let rx = SRV_MSG.1.lock().unwrap();
 
