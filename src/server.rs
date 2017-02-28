@@ -3,15 +3,14 @@ extern crate std;
 extern crate hyper;
 extern crate hyper_native_tls;
 extern crate regex;
-#[macro_use()]
-extern crate serde_json;
 
 use self::hyper::Client;
 use self::hyper::header::{SetCookie, Cookie, Header, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
-use self::serde_json::Value;
+use serde_json::Value;
+use serde_json::Map;
 use plugin_pointer::*;
 use util::*;
 use purple_sys::*;
@@ -45,6 +44,7 @@ lazy_static!{
 #[derive(Debug)]
 pub enum SrvMsg {
     ShowVerifyImage(String),
+    AddContact,
 }
 
 #[derive(Debug)]
@@ -83,6 +83,18 @@ impl WeChat {
         }
     }
 
+    fn set_uin(&mut self, uin: &str) {
+        self.uin = uin.to_owned();
+    }
+
+    fn set_sid(&mut self, sid: &str) {
+        self.sid = sid.to_owned();
+    }
+
+    fn set_skey(&mut self, skey: &str) {
+        self.skey = skey.to_owned();
+    }
+
     fn set_cookies(&mut self, cookies: &SetCookie) {
         let mut jar = self.headers.get_mut::<Cookie>().unwrap();
         for c in cookies.iter() {
@@ -93,6 +105,20 @@ impl WeChat {
 
     fn headers(&self) -> Headers {
         self.headers.clone()
+    }
+
+    fn base_data(&self) -> Value {
+
+        let mut base_obj = Map::with_capacity(4);
+        base_obj.insert("Uin".to_owned(), Value::String(self.uin.clone()));
+        base_obj.insert("Sid".to_owned(), Value::String(self.sid.clone()));
+        base_obj.insert("Skey".to_owned(), Value::String(self.skey.clone()));
+        base_obj.insert("DeviceID".to_owned(), Value::String(String::new()));
+
+        let mut obj = Map::new();
+        obj.insert("BaseRequest".to_owned(), Value::Object(base_obj));
+
+        Value::Object(obj)
     }
 }
 
@@ -139,21 +165,26 @@ fn check_scan(uuid: String) {
 
     {
         let mut wechat = WECHAT.write().unwrap();
+        wechat.set_uin(&uin);
+        wechat.set_skey(&skey);
+        wechat.set_sid(&sid);
         wechat.set_cookies(&cookies);
     }
 
     // init
-    let data = format!("{{ \"BaseRequest\": {{ \"Uin\": \"{}\", \"Sid\": \"{}\", \"Skey\": \
-                        \"{}\", \"DeviceID\": \"{}\" }} }}",
-                       uin,
-                       sid,
-                       skey,
-                       "");
+    let data = WECHAT.read().unwrap().base_data();
     let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
                       pass_ticket,
                       skey);
     let result = post(&url, &data).parse::<Value>().unwrap();
+    let ref contact_list = result["ContactList"].as_array().unwrap();
+    for contact in *contact_list {
+        let is_chat = contact["MemberCount"] != json!(0);
+        if !is_chat {
+            println!("{:#?}", contact);
+        }
+    }
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
@@ -181,8 +212,6 @@ fn save_qr_file<T: AsRef<str>>(url: T) -> String {
     let mut result = Vec::new();
     response.read_to_end(&mut result).unwrap();
 
-    let mut s = String::new();
-    s.push_str("aaa");
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -206,7 +235,7 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
     result
 }
 
-fn post<U: AsRef<str> + Debug, D: AsRef<str> + Debug>(url: U, data: D) -> String {
+fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
 
     let headers = WECHAT.read().unwrap().headers();
     println!("get: {:?}\nheaders:{:?}\npost_data: {:?}",
@@ -214,7 +243,7 @@ fn post<U: AsRef<str> + Debug, D: AsRef<str> + Debug>(url: U, data: D) -> String
              headers,
              data);
     let mut response =
-        CLIENT.post(url.as_ref()).headers(headers).body(data.as_ref()).send().unwrap();
+        CLIENT.post(url.as_ref()).headers(headers).body(&data.to_string()).send().unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     println!("result: {}", result);
@@ -231,6 +260,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
+            SrvMsg::AddContact => {}
         }
     }
 

@@ -3,6 +3,8 @@ extern crate glib_sys;
 extern crate libc;
 #[macro_use]
 extern crate lazy_static;
+#[macro_use]
+extern crate serde_json;
 
 mod plugin_pointer;
 mod server;
