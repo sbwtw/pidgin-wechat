@@ -44,7 +44,7 @@ lazy_static!{
 #[derive(Debug)]
 pub enum SrvMsg {
     ShowVerifyImage(String),
-    AddContact,
+    AddContact(User),
 }
 
 #[derive(Debug)]
@@ -57,10 +57,34 @@ struct WeChat {
     sid: String,
     skey: String,
     device_id: String,
+    // pass_ticket: String,
     headers: Headers,
 }
 
 unsafe impl std::marker::Sync for WeChat {}
+
+#[derive(Debug)]
+struct User {
+    user_name: String,
+    nick_name: String,
+}
+
+impl User {
+    fn from_json(json: &Value) -> User {
+        User {
+            user_name: json["UserName"].as_str().unwrap().to_owned(),
+            nick_name: json["NickName"].as_str().unwrap().to_owned(),
+        }
+    }
+
+    fn user_name_str(&self) -> CString {
+        CString::new(self.user_name.clone()).unwrap()
+    }
+
+    fn nick_name_str(&self) -> CString {
+        CString::new(self.nick_name.clone()).unwrap()
+    }
+}
 
 impl WeChat {
     fn new() -> WeChat {
@@ -83,12 +107,24 @@ impl WeChat {
         }
     }
 
+    fn uin(&self) -> &str {
+        &self.uin
+    }
+
     fn set_uin(&mut self, uin: &str) {
         self.uin = uin.to_owned();
     }
 
+    fn sid(&self) -> &str {
+        &self.uin
+    }
+
     fn set_sid(&mut self, sid: &str) {
         self.sid = sid.to_owned();
+    }
+
+    fn skey(&self) -> &str {
+        &self.skey
     }
 
     fn set_skey(&mut self, skey: &str) {
@@ -129,7 +165,6 @@ pub fn start_login() {
 
     // start check login thread
     thread::spawn(|| { check_scan(uuid); });
-
     SRV_MSG.0.lock().unwrap().send(SrvMsg::ShowVerifyImage(file_path)).unwrap();
 }
 
@@ -182,9 +217,19 @@ fn check_scan(uuid: String) {
     for contact in *contact_list {
         let is_chat = contact["MemberCount"] != json!(0);
         if !is_chat {
-            println!("{:#?}", contact);
+            let user = User::from_json(contact);
+
+            SRV_MSG.0.lock().unwrap().send(SrvMsg::AddContact(user)).unwrap();
         }
     }
+
+    // start message check loop
+    thread::spawn(|| sync_check());
+}
+
+fn sync_check() {
+
+    // let uid
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
@@ -260,11 +305,30 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
-            SrvMsg::AddContact => {}
+            SrvMsg::AddContact(user) => add_buddy(&user),
         }
     }
 
     1
+}
+
+unsafe fn add_buddy(user: &User) {
+
+    println!("add_buddy: {:?}", user);
+
+    let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+    let group_name = CString::new("Wechat").unwrap();
+    let group = purple_find_group(group_name.as_ptr());
+
+    let user_name = user.user_name_str();
+
+    let buddy = purple_buddy_new(account, user_name.as_ptr(), user.nick_name_str().as_ptr());
+    (*buddy).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
+    purple_blist_add_buddy(buddy, null_mut(), group, null_mut());
+
+    // set status to available
+    let available = CString::new("available").unwrap();
+    purple_prpl_got_user_status(account, user_name.as_ptr(), available.as_ptr());
 }
 
 pub fn login() {
