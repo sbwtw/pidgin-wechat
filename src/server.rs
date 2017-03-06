@@ -3,6 +3,7 @@ extern crate std;
 extern crate hyper;
 extern crate hyper_native_tls;
 extern crate regex;
+extern crate time;
 
 use self::hyper::Client;
 use self::hyper::header::{SetCookie, Cookie, Header, Headers};
@@ -27,6 +28,7 @@ use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::collections::BTreeMap;
 
 lazy_static!{
     pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
@@ -56,9 +58,11 @@ struct WeChat {
     uin: String,
     sid: String,
     skey: String,
-    device_id: String,
-    // pass_ticket: String,
+    // device_id: String,
+    pass_ticket: String,
     headers: Headers,
+    user_info: Value,
+    sync_keys: BTreeMap<i64, i64>,
 }
 
 unsafe impl std::marker::Sync for WeChat {}
@@ -89,7 +93,7 @@ impl User {
 impl WeChat {
     fn new() -> WeChat {
         let mut headers = Headers::new();
-        headers.set_raw("Cookie", vec![b"".to_vec()]);
+        headers.set_raw("Cookie", vec![vec![]]);
         headers.set_raw("ContentType",
                         vec![b"application/json; charset=UTF-8".to_vec()]);
         headers.set_raw("Host", vec![b"web.wechat.com".to_vec()]);
@@ -102,8 +106,11 @@ impl WeChat {
             uin: String::new(),
             sid: String::new(),
             skey: String::new(),
-            device_id: String::new(),
+            // device_id: String::new(),
+            pass_ticket: String::new(),
             headers: headers,
+            user_info: Value::Null,
+            sync_keys: BTreeMap::new(),
         }
     }
 
@@ -116,7 +123,7 @@ impl WeChat {
     }
 
     fn sid(&self) -> &str {
-        &self.uin
+        &self.sid
     }
 
     fn set_sid(&mut self, sid: &str) {
@@ -131,12 +138,56 @@ impl WeChat {
         self.skey = skey.to_owned();
     }
 
+    fn pass_ticket(&self) -> &str {
+        &self.pass_ticket
+    }
+
+    fn set_pass_ticket(&mut self, pass_ticket: &str) {
+        self.pass_ticket = pass_ticket.to_owned();
+    }
+
+    fn sync_key(&self) -> String {
+        assert!(!self.sync_keys.is_empty());
+
+        let mut buf = String::new();
+        for (k, v) in self.sync_keys.iter() {
+            buf.push_str(&format!("{}_{}|", k, v));
+        }
+        buf.pop();
+
+        buf
+    }
+
+    fn set_sync_key(&mut self, json: &Value) {
+
+        if let Value::Array(ref list) = json["SyncKey"]["List"] {
+            for item in list {
+                let k = item["Key"].as_i64().unwrap();
+                let v = item["Val"].as_i64().unwrap();
+
+                self.sync_keys.insert(k, v);
+            }
+        }
+    }
+
+    fn set_user_info(&mut self, json: &Value) {
+        self.user_info = json["User"].clone()
+    }
+
+    fn user_name(&self) -> &str {
+        self.user_info["UserName"].as_str().unwrap()
+    }
+
     fn set_cookies(&mut self, cookies: &SetCookie) {
-        let mut jar = self.headers.get_mut::<Cookie>().unwrap();
+        println!("cookies: {:?}", cookies);
+        let ref mut jar = self.headers.get_mut::<Cookie>().unwrap();
         for c in cookies.iter() {
             let i = c.split(';').next().unwrap();
+            assert!(!i.is_empty());
             jar.push(i.to_owned());
         }
+
+        jar.remove(0);
     }
 
     fn headers(&self) -> Headers {
@@ -155,6 +206,18 @@ impl WeChat {
         obj.insert("BaseRequest".to_owned(), Value::Object(base_obj));
 
         Value::Object(obj)
+    }
+
+    fn status_notify_data(&self) -> Value {
+
+        let mut value = self.base_data();
+
+        value["Code"] = json!(3);
+        value["FromUserName"] = json!(self.user_name());
+        value["ToUserName"] = json!(self.user_name());
+        value["ClientMsgId"] = json!(time_stamp());
+
+        value
     }
 }
 
@@ -203,8 +266,12 @@ fn check_scan(uuid: String) {
         wechat.set_uin(&uin);
         wechat.set_skey(&skey);
         wechat.set_sid(&sid);
+        wechat.set_pass_ticket(&pass_ticket);
         wechat.set_cookies(&cookies);
     }
+
+    println!("cookies::::::::::::  {:?}",
+             WECHAT.read().unwrap().headers());
 
     // init
     let data = WECHAT.read().unwrap().base_data();
@@ -212,8 +279,14 @@ fn check_scan(uuid: String) {
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
                       pass_ticket,
                       skey);
-    let result = post(&url, &data).parse::<Value>().unwrap();
-    let ref contact_list = result["ContactList"].as_array().unwrap();
+    let json = post(&url, &data).parse::<Value>().unwrap();
+    {
+        let mut wechat = WECHAT.write().unwrap();
+        wechat.set_sync_key(&json);
+        wechat.set_user_info(&json);
+    }
+
+    let ref contact_list = json["ContactList"].as_array().unwrap();
     for contact in *contact_list {
         let is_chat = contact["MemberCount"] != json!(0);
         if !is_chat {
@@ -223,13 +296,57 @@ fn check_scan(uuid: String) {
         }
     }
 
+    // status notify
+    let url = format!("https://web.wechat.\
+                       com/cgi-bin/mmwebwx-bin/webwxstatusnotify?lang=zh_CN&pass_ticket={}",
+                      pass_ticket);
+    let data = WECHAT.read().unwrap().status_notify_data();
+    let result = post(&url, &data);
+
     // start message check loop
     thread::spawn(|| sync_check());
 }
 
+fn time_stamp() -> i64 {
+    time::get_time().sec * 1000
+}
+
 fn sync_check() {
 
+    let mut headers = Headers::new();
+    {
+        let hrs = WECHAT.read().unwrap().headers();
+        println!("{:?}", hrs);
+        headers.set(hrs.get::<Cookie>().unwrap().clone());
+        headers.set_raw("Host", vec![b"webpush.web.wechat.com".to_vec()]);
+        headers.set_raw("Accept", vec![b"*/*".to_vec()]);
+        headers.set_raw("Referer",
+                        vec![b"https://webpush.web.wechat.com/?&lang=zh_CN".to_vec()]);
+    }
+
+    println!("{:?}", headers);
+
     // let uid
+    loop {
+        let url = {
+            let wechat = WECHAT.read().unwrap();
+            format!("https://webpush.web.wechat.\
+                 com/cgi-bin/mmwebwx-bin/synccheck?sid={}&uin={}&skey={}&deviceid={}&synckey={}&r={}&_={}",
+                    wechat.sid(),
+                    wechat.uin(),
+                    wechat.skey(),
+                    "",
+                    wechat.sync_key(),
+                    time_stamp(),
+                    time_stamp())
+        };
+
+        println!("url: {}", url);
+        let mut response = CLIENT.get(&url).headers(headers.clone()).send().unwrap();
+        let mut result = String::new();
+        response.read_to_string(&mut result).unwrap();
+        println!("{}", result);
+    }
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
@@ -283,7 +400,7 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
 fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
 
     let headers = WECHAT.read().unwrap().headers();
-    println!("get: {:?}\nheaders:{:?}\npost_data: {:?}",
+    println!("post: {:?}\nheaders:{:?}\npost_data: {:?}",
              url,
              headers,
              data);
