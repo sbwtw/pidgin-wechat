@@ -62,7 +62,7 @@ struct WeChat {
     pass_ticket: String,
     headers: Headers,
     user_info: Value,
-    sync_keys: BTreeMap<i64, i64>,
+    sync_keys: Value,
 }
 
 unsafe impl std::marker::Sync for WeChat {}
@@ -110,7 +110,7 @@ impl WeChat {
             pass_ticket: String::new(),
             headers: headers,
             user_info: Value::Null,
-            sync_keys: BTreeMap::new(),
+            sync_keys: Value::Null,
         }
     }
 
@@ -146,11 +146,15 @@ impl WeChat {
         self.pass_ticket = pass_ticket.to_owned();
     }
 
-    fn sync_key(&self) -> String {
-        assert!(!self.sync_keys.is_empty());
+    fn sync_key_str(&self) -> String {
+
+        assert!(self.sync_keys.is_array());
 
         let mut buf = String::new();
-        for (k, v) in self.sync_keys.iter() {
+        for item in self.sync_keys.as_array().unwrap() {
+            let k = item["Key"].as_i64().unwrap();
+            let v = item["Val"].as_i64().unwrap();
+
             buf.push_str(&format!("{}_{}|", k, v));
         }
         buf.pop();
@@ -158,15 +162,18 @@ impl WeChat {
         buf
     }
 
+    fn sync_key(&self) -> Value {
+        assert!(self.sync_keys.is_array());
+
+        let count = self.sync_keys.as_array().unwrap().len();
+        let value = json!({"Count" : count, "List" : self.sync_keys});
+
+        value
+    }
+
     fn set_sync_key(&mut self, json: &Value) {
-
-        if let Value::Array(ref list) = json["SyncKey"]["List"] {
-            for item in list {
-                let k = item["Key"].as_i64().unwrap();
-                let v = item["Val"].as_i64().unwrap();
-
-                self.sync_keys.insert(k, v);
-            }
+        if let Value::Array(ref list) = json["List"] {
+            self.sync_keys = Value::Array(list.clone());
         }
     }
 
@@ -216,6 +223,16 @@ impl WeChat {
         value["FromUserName"] = json!(self.user_name());
         value["ToUserName"] = json!(self.user_name());
         value["ClientMsgId"] = json!(time_stamp());
+
+        value
+    }
+
+    fn message_check_data(&self) -> Value {
+
+        let mut value = self.base_data();
+
+        value["SyncKey"] = self.sync_key().clone();
+        value["rr"] = json!(!time_stamp());
 
         value
     }
@@ -282,7 +299,7 @@ fn check_scan(uuid: String) {
     let json = post(&url, &data).parse::<Value>().unwrap();
     {
         let mut wechat = WECHAT.write().unwrap();
-        wechat.set_sync_key(&json);
+        wechat.set_sync_key(&json["SyncKey"]);
         wechat.set_user_info(&json);
     }
 
@@ -336,17 +353,50 @@ fn sync_check() {
                     wechat.uin(),
                     wechat.skey(),
                     "",
-                    wechat.sync_key(),
+                    wechat.sync_key_str(),
                     time_stamp(),
                     time_stamp())
         };
 
-        println!("url: {}", url);
+        println!("sync check url: {}", url);
+
         let mut response = CLIENT.get(&url).headers(headers.clone()).send().unwrap();
         let mut result = String::new();
         response.read_to_string(&mut result).unwrap();
-        println!("{}", result);
+
+        let reg = Regex::new(r#"retcode:"(\d+)",selector:"(\d+)""#).unwrap();
+        let caps = reg.captures(&result).unwrap();
+        let retcode: isize = caps.get(1).unwrap().as_str().parse().unwrap();
+        let selector: isize = caps.get(2).unwrap().as_str().parse().unwrap();
+        println!("{} = {} - {}", result, retcode, selector);
+
+        // check error
+        if retcode != 0 {
+            break;
+        }
+
+        // 2 means new message received
+        if selector == 2 {
+            check_new_message();
+        }
     }
+}
+
+fn check_new_message() {
+
+    let result = {
+        let wechat = WECHAT.read().unwrap();
+        let url = format!("https://web.wechat.\
+                       com/cgi-bin/mmwebwx-bin/webwxsync?sid={}&skey={}&pass_ticket={}",
+                      wechat.sid(),
+                      wechat.skey(),
+                      wechat.pass_ticket());
+        post(&url, &wechat.message_check_data())
+    };
+
+    // refersh sync check key
+    let json: Value = result.parse().unwrap();
+    WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
