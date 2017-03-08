@@ -47,6 +47,7 @@ lazy_static!{
 pub enum SrvMsg {
     ShowVerifyImage(String),
     AddContact(User),
+    MessageReceived(Value),
 }
 
 #[derive(Debug)]
@@ -396,7 +397,11 @@ fn check_new_message() {
 
     // refersh sync check key
     let json: Value = result.parse().unwrap();
-    WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
+    {
+        WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
+    }
+
+    SRV_MSG.0.lock().unwrap().send(SrvMsg::MessageReceived(json)).unwrap();
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
@@ -473,10 +478,38 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
+            SrvMsg::MessageReceived(json) => append_message(&json),
         }
     }
 
     1
+}
+
+unsafe fn append_message(json: &Value) {
+    if let Value::Array(ref list) = json["AddMsgList"] {
+
+        let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+        let gc = (*account_ptr).gc;
+
+        for msg in list {
+            let msg_type = msg["MsgType"].as_i64().unwrap();
+            // 51 is wechat init message
+            if msg_type == 51 {
+                continue;
+            }
+
+            let content = CString::new(msg["Content"].as_str().unwrap()).unwrap();
+            let from = CString::new(msg["FromUserName"].as_str().unwrap()).unwrap();
+            let to = CString::new(msg["ToUserName"].as_str().unwrap()).unwrap();
+            let time = msg["CreateTime"].as_i64().unwrap();
+
+            serv_got_im(gc,
+                        from.as_ptr(),
+                        content.as_ptr(),
+                        PURPLE_MESSAGE_RECV,
+                        time);
+        }
+    }
 }
 
 unsafe fn add_buddy(user: &User) {
