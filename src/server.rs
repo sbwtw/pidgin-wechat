@@ -314,6 +314,17 @@ fn check_scan(uuid: String) {
         }
     }
 
+    // refersh current user name
+    unsafe {
+        let uname = CString::new(WECHAT.read().unwrap().user_name()).unwrap();
+        let alias = CString::new("You").unwrap();
+        println!("set usernmae: {:?}", uname);
+        purple_account_set_username(ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
+                                    uname.as_ptr());
+        purple_account_set_alias(ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
+                                 alias.as_ptr());
+    }
+
     // status notify
     let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxstatusnotify?lang=zh_CN&pass_ticket={}",
@@ -488,6 +499,11 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 unsafe fn append_message(json: &Value) {
     if let Value::Array(ref list) = json["AddMsgList"] {
 
+        let self_name = {
+            let wechat = WECHAT.read().unwrap();
+            wechat.user_name().to_owned()
+        };
+
         let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
         let gc = (*account_ptr).gc;
 
@@ -499,15 +515,24 @@ unsafe fn append_message(json: &Value) {
             }
 
             let content = CString::new(msg["Content"].as_str().unwrap()).unwrap();
-            let from = CString::new(msg["FromUserName"].as_str().unwrap()).unwrap();
+            let from = msg["FromUserName"].as_str().unwrap();
             let to = CString::new(msg["ToUserName"].as_str().unwrap()).unwrap();
             let time = msg["CreateTime"].as_i64().unwrap();
 
-            serv_got_im(gc,
-                        from.as_ptr(),
-                        content.as_ptr(),
-                        PURPLE_MESSAGE_RECV,
-                        time);
+            if self_name != from {
+                let from = CString::new(from).unwrap();
+                serv_got_im(gc,
+                            from.as_ptr(),
+                            content.as_ptr(),
+                            PURPLE_MESSAGE_RECV,
+                            time);
+            } else {
+                serv_got_im(gc,
+                            to.as_ptr(),
+                            content.as_ptr(),
+                            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_WHISPER,
+                            time);
+            }
         }
     }
 }

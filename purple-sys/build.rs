@@ -8,8 +8,9 @@ fn main() {
 
     let out_dir = env::var("OUT_DIR").unwrap();
     let out_file = Path::new(&out_dir).join("purple.rs");
-    let mut bindings =
-        bindgen::builder().no_unstable_rust().bitfield_enum("PURPLE_ICON_SCALE_.*|OPT_PROTO_.*");
+    let mut bindings = bindgen::builder()
+        .no_unstable_rust()
+        .bitfield_enum("PURPLE_ICON_SCALE_.*|OPT_PROTO_.*|PURPLE_MESSAGE_.*");
 
     let purple_lib = pkg_config::probe_library("purple").unwrap();
 
