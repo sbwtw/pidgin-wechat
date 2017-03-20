@@ -15,10 +15,11 @@ use purple_sys::*;
 use std::os::raw::{c_void, c_char, c_int};
 use std::ptr::null_mut;
 use std::boxed::Box;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::sync::RwLock;
 use plugin_pointer::GlobalPointer;
 use server::ACCOUNT;
+use server::send_im;
 
 const TRUE: i32 = 1;
 const FALSE: i32 = 0;
@@ -116,22 +117,6 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
     purple_prpl_got_user_status(account, name.as_ptr(), available.as_ptr());
 
     std::thread::spawn(|| { server::login(); });
-}
-
-unsafe extern "C" fn send_im(gc: *mut PurpleConnection,
-                             who: *const c_char,
-                             msg: *const c_char,
-                             flags: PurpleMessageFlags)
-                             -> c_int {
-
-    let who = CStr::from_ptr(who);
-    let msg = CStr::from_ptr(msg);
-
-    debug(format!("{:?}, {:?}, {:?}\n", who, msg, flags));
-
-    serv_got_im(gc, who.as_ptr(), msg.as_ptr(), flags, 1486873267);
-
-    1
 }
 
 extern "C" fn chat_info(_: *mut PurpleConnection) -> *mut GList {

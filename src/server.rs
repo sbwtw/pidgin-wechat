@@ -18,7 +18,7 @@ use purple_sys::*;
 use glib_sys::gpointer;
 use std::os::raw::{c_void, c_char, c_int};
 use std::io::*;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::ptr::null_mut;
 use std::sync::{RwLock, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -52,7 +52,7 @@ pub enum SrvMsg {
 
 #[derive(Debug)]
 pub enum CltMsg {
-    SendMsg,
+    SendMsg(String, String),
 }
 
 struct WeChat {
@@ -166,7 +166,10 @@ impl WeChat {
     fn sync_key(&self) -> Value {
         assert!(self.sync_keys.is_array());
 
-        let count = self.sync_keys.as_array().unwrap().len();
+        let count = self.sync_keys
+            .as_array()
+            .unwrap()
+            .len();
         let value = json!({"Count" : count, "List" : self.sync_keys});
 
         value
@@ -205,7 +208,7 @@ impl WeChat {
     fn base_data(&self) -> Value {
 
         let mut base_obj = Map::with_capacity(4);
-        base_obj.insert("Uin".to_owned(), Value::String(self.uin.clone()));
+        base_obj.insert("Uin".to_owned(), json!(self.uin.parse::<usize>().unwrap()));
         base_obj.insert("Sid".to_owned(), Value::String(self.sid.clone()));
         base_obj.insert("Skey".to_owned(), Value::String(self.skey.clone()));
         base_obj.insert("DeviceID".to_owned(), Value::String(String::new()));
@@ -237,6 +240,27 @@ impl WeChat {
 
         value
     }
+
+    fn message_send_data(&self, who: String, content: String) -> Value {
+
+        let mut id = time_stamp().to_string();
+        id.push_str("1234");
+
+        let mut msg = json!({
+            "Type" : 1,
+            "Content" : json!(content),
+            "FromUserName" : json!(self.user_name()),
+            "ToUserName" : json!(who),
+            "LocalID" : json!(id),
+            "ClientMsgId" : json!(id)
+        });
+
+        let mut value = self.base_data();
+        value["Msg"] = msg;
+        value["Scene"] = json!(0);
+
+        value
+    }
 }
 
 pub fn start_login() {
@@ -246,7 +270,11 @@ pub fn start_login() {
 
     // start check login thread
     thread::spawn(|| { check_scan(uuid); });
-    SRV_MSG.0.lock().unwrap().send(SrvMsg::ShowVerifyImage(file_path)).unwrap();
+    SRV_MSG.0
+        .lock()
+        .unwrap()
+        .send(SrvMsg::ShowVerifyImage(file_path))
+        .unwrap();
 }
 
 fn check_scan(uuid: String) {
@@ -310,7 +338,11 @@ fn check_scan(uuid: String) {
         if !is_chat {
             let user = User::from_json(contact);
 
-            SRV_MSG.0.lock().unwrap().send(SrvMsg::AddContact(user)).unwrap();
+            SRV_MSG.0
+                .lock()
+                .unwrap()
+                .send(SrvMsg::AddContact(user))
+                .unwrap();
         }
     }
 
@@ -372,14 +404,25 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = CLIENT.get(&url).headers(headers.clone()).send().unwrap();
+        let mut response = CLIENT.get(&url)
+            .headers(headers.clone())
+            .send()
+            .unwrap();
         let mut result = String::new();
         response.read_to_string(&mut result).unwrap();
 
         let reg = Regex::new(r#"retcode:"(\d+)",selector:"(\d+)""#).unwrap();
         let caps = reg.captures(&result).unwrap();
-        let retcode: isize = caps.get(1).unwrap().as_str().parse().unwrap();
-        let selector: isize = caps.get(2).unwrap().as_str().parse().unwrap();
+        let retcode: isize = caps.get(1)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
+        let selector: isize = caps.get(2)
+            .unwrap()
+            .as_str()
+            .parse()
+            .unwrap();
         println!("{} = {} - {}", result, retcode, selector);
 
         // check error
@@ -392,6 +435,31 @@ fn sync_check() {
             check_new_message();
         }
     }
+}
+
+pub unsafe extern "C" fn send_im(gc: *mut PurpleConnection,
+                                 who: *const c_char,
+                                 msg: *const c_char,
+                                 flags: PurpleMessageFlags)
+                                 -> c_int {
+
+    let who = CStr::from_ptr(who).to_string_lossy().into_owned().to_owned();
+    let msg = CStr::from_ptr(msg).to_string_lossy().into_owned().to_owned();
+
+    println!("send_im: {:?}, {:?}, {:?}, {:?}", gc, who, msg, flags);
+
+    let wechat = WECHAT.read().unwrap();
+    let url =
+        format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?pass_ticket={}", wechat.pass_ticket());
+    let data = wechat.message_send_data(who, msg);
+    let result = post(url, &data);
+
+    // CLT_MSG.0
+    // .lock()
+    // .unwrap()
+    // .send(CltMsg::SendMsg(who, msg));
+
+    1
 }
 
 fn check_new_message() {
@@ -412,7 +480,11 @@ fn check_new_message() {
         WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
     }
 
-    SRV_MSG.0.lock().unwrap().send(SrvMsg::MessageReceived(json)).unwrap();
+    SRV_MSG.0
+        .lock()
+        .unwrap()
+        .send(SrvMsg::MessageReceived(json))
+        .unwrap();
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
@@ -431,7 +503,10 @@ fn get_uuid() -> String {
     let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
 
-    caps.get(1).unwrap().as_str().to_owned()
+    caps.get(1)
+        .unwrap()
+        .as_str()
+        .to_owned()
 }
 
 fn save_qr_file<T: AsRef<str>>(url: T) -> String {
@@ -454,8 +529,10 @@ fn save_qr_file<T: AsRef<str>>(url: T) -> String {
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
     println!("get: {:?}", url);
-    let mut response =
-        CLIENT.get(url.as_ref()).headers(WECHAT.read().unwrap().headers()).send().unwrap();
+    let mut response = CLIENT.get(url.as_ref())
+        .headers(WECHAT.read().unwrap().headers())
+        .send()
+        .unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     println!("result: {}", result);
@@ -470,8 +547,11 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
              url,
              headers,
              data);
-    let mut response =
-        CLIENT.post(url.as_ref()).headers(headers).body(&data.to_string()).send().unwrap();
+    let mut response = CLIENT.post(url.as_ref())
+        .headers(headers)
+        .body(&data.to_string())
+        .send()
+        .unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     println!("result: {}", result);
