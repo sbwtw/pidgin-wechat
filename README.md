@@ -14,8 +14,8 @@ cp target/release/libwechat.so ~/.purple/plugins/
 
 ## 开发进度
 - [x] 登录
-- [ ] 收发文字消息
-- [ ] 图片消息
+- [x] 收发文字消息
+- [ ] 显示图片消息
 - [ ] 用户头像
 - [ ] 群聊天
 - [ ] 公众号
