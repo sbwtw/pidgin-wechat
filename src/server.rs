@@ -6,35 +6,29 @@ extern crate regex;
 extern crate time;
 
 use self::hyper::Client;
-use self::hyper::header::{SetCookie, Cookie, Header, Headers};
+use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
 use serde_json::Value;
 use serde_json::Map;
 use plugin_pointer::*;
-use util::*;
 use purple_sys::*;
-use glib_sys::gpointer;
 use std::os::raw::{c_void, c_char, c_int};
 use std::io::*;
 use std::ffi::{CStr, CString};
 use std::ptr::null_mut;
 use std::sync::{RwLock, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::cell::Cell;
-use std::marker::Copy;
 use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
-use std::sync::Arc;
-use std::collections::BTreeMap;
 
 lazy_static!{
     pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
     static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
-    static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
+    // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     static ref WECHAT: RwLock<WeChat> = RwLock::new(WeChat::new());
     static ref CLIENT: Client = {
         let ssl = NativeTlsClient::new().unwrap();
@@ -44,16 +38,15 @@ lazy_static!{
 }
 
 #[derive(Debug)]
-pub enum SrvMsg {
+enum SrvMsg {
     ShowVerifyImage(String),
     AddContact(User),
     MessageReceived(Value),
 }
 
-#[derive(Debug)]
-pub enum CltMsg {
-    SendMsg(String, String),
-}
+// #[derive(Debug)]
+// pub enum CltMsg {
+// }
 
 struct WeChat {
     uin: String,
@@ -246,7 +239,7 @@ impl WeChat {
         let mut id = time_stamp().to_string();
         id.push_str("1234");
 
-        let mut msg = json!({
+        let msg = json!({
             "Type" : 1,
             "Content" : json!(content),
             "FromUserName" : json!(self.user_name()),
@@ -281,8 +274,8 @@ fn check_scan(uuid: String) {
     let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
                       1);
-
-    let result = get(&url);
+    // TODO: check result
+    let _ = get(&url);
 
     let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
@@ -362,7 +355,8 @@ fn check_scan(uuid: String) {
                        com/cgi-bin/mmwebwx-bin/webwxstatusnotify?lang=zh_CN&pass_ticket={}",
                       pass_ticket);
     let data = WECHAT.read().unwrap().status_notify_data();
-    let result = post(&url, &data);
+    // TODO: check result
+    let _ = post(&url, &data);
 
     // start message check loop
     thread::spawn(|| sync_check());
@@ -430,10 +424,12 @@ fn sync_check() {
             break;
         }
 
-        // 2 means new message received
-        if selector == 2 {
-            check_new_message();
+        // no new message.
+        if selector == 0 {
+            continue;
         }
+
+        check_new_message();
     }
 }
 
@@ -452,7 +448,8 @@ pub unsafe extern "C" fn send_im(gc: *mut PurpleConnection,
     let url =
         format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?pass_ticket={}", wechat.pass_ticket());
     let data = wechat.message_send_data(who, msg);
-    let result = post(url, &data);
+    // TODO: check result.
+    let _ = post(url, &data);
 
     // CLT_MSG.0
     // .lock()
@@ -554,7 +551,11 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
         .unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    println!("result: {}", result);
+    if result.len() > 500 {
+        println!("result: {}", &result[0..300]);
+    } else {
+        println!("result: {}", result);
+    }
 
     result
 }
@@ -564,8 +565,6 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
     let rx = SRV_MSG.1.lock().unwrap();
 
     if let Ok(m) = rx.try_recv() {
-        debug(format!("GOT: {:#?}", m));
-
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),

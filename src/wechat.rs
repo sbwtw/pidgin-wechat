@@ -8,11 +8,9 @@ extern crate serde_json;
 
 mod plugin_pointer;
 mod server;
-mod util;
 
-use util::*;
 use purple_sys::*;
-use std::os::raw::{c_void, c_char, c_int};
+use std::os::raw::{c_void, c_char};
 use std::ptr::null_mut;
 use std::boxed::Box;
 use std::ffi::CString;
@@ -42,8 +40,6 @@ extern "C" fn list_icon(_: *mut PurpleAccount, _: *mut PurpleBuddy) -> *const c_
 }
 
 extern "C" fn status_types(_: *mut PurpleAccount) -> *mut GList {
-
-    debug("status types");
 
     let mut list: *mut GList = null_mut();
 
@@ -85,7 +81,6 @@ extern "C" fn status_types(_: *mut PurpleAccount) -> *mut GList {
 }
 
 unsafe extern "C" fn login(account: *mut PurpleAccount) {
-    debug("login\n");
 
     ACCOUNT.write().unwrap().set(account as *mut c_void);
 
@@ -120,7 +115,6 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
 }
 
 extern "C" fn chat_info(_: *mut PurpleConnection) -> *mut GList {
-    debug("chat_info");
 
     let list: *mut GList = null_mut();
 
@@ -129,20 +123,15 @@ extern "C" fn chat_info(_: *mut PurpleConnection) -> *mut GList {
 
 extern "C" fn chat_info_defaults(_: *mut PurpleConnection, _: *const c_char) -> *mut GHashTable {
 
-    debug("chat_info_default");
-
     let table: *mut GHashTable = null_mut();
 
     table
 }
 
 extern "C" fn close(_: *mut PurpleConnection) {
-    debug("close\n");
 }
 
 extern "C" fn buddy_list(gc: *mut PurpleConnection) -> *mut PurpleRoomlist {
-
-    debug("get buddy list ==========");
 
     let fields: *mut GList = null_mut();
 

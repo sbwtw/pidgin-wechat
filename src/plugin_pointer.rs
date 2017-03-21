@@ -1,7 +1,6 @@
 
 extern crate std;
 
-use purple_sys::PurplePlugin;
 use std::os::raw::c_void;
 
 #[derive(Copy, Clone)]
