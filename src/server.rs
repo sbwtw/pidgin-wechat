@@ -385,15 +385,15 @@ fn sync_check() {
     loop {
         let url = {
             let wechat = WECHAT.read().unwrap();
+            let ts = time_stamp();
             format!("https://webpush.web.wechat.\
-                 com/cgi-bin/mmwebwx-bin/synccheck?sid={}&uin={}&skey={}&deviceid={}&synckey={}&r={}&_={}",
+                 com/cgi-bin/mmwebwx-bin/synccheck?sid={}&uin={}&skey={}&deviceid=&synckey={}&r={}&_={}",
                     wechat.sid(),
                     wechat.uin(),
                     wechat.skey(),
-                    "",
                     wechat.sync_key_str(),
-                    time_stamp(),
-                    time_stamp())
+                    ts,
+                    ts)
         };
 
         println!("sync check url: {}", url);
@@ -433,21 +433,22 @@ fn sync_check() {
     }
 }
 
-pub unsafe extern "C" fn send_im(gc: *mut PurpleConnection,
+pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
                                  who: *const c_char,
                                  msg: *const c_char,
-                                 flags: PurpleMessageFlags)
+                                 _: PurpleMessageFlags)
                                  -> c_int {
 
     let who = CStr::from_ptr(who).to_string_lossy().into_owned().to_owned();
     let msg = CStr::from_ptr(msg).to_string_lossy().into_owned().to_owned();
 
-    println!("send_im: {:?}, {:?}, {:?}, {:?}", gc, who, msg, flags);
+    let (url, data) = {
+        let wechat = WECHAT.read().unwrap();
+        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?pass_ticket={}", wechat.pass_ticket());
+        let data = wechat.message_send_data(who, msg);
 
-    let wechat = WECHAT.read().unwrap();
-    let url =
-        format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?pass_ticket={}", wechat.pass_ticket());
-    let data = wechat.message_send_data(who, msg);
+        (url, data)
+    };
     // TODO: check result.
     let _ = post(url, &data);
 
@@ -461,15 +462,18 @@ pub unsafe extern "C" fn send_im(gc: *mut PurpleConnection,
 
 fn check_new_message() {
 
-    let result = {
+    let (url, data) = {
         let wechat = WECHAT.read().unwrap();
         let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxsync?sid={}&skey={}&pass_ticket={}",
                       wechat.sid(),
                       wechat.skey(),
                       wechat.pass_ticket());
-        post(&url, &wechat.message_check_data())
+
+        (url, wechat.message_check_data())
     };
+
+    let result = post(&url, &data);
 
     // refersh sync check key
     let json: Value = result.parse().unwrap();
@@ -506,8 +510,8 @@ fn get_uuid() -> String {
         .to_owned()
 }
 
-fn save_qr_file<T: AsRef<str>>(url: T) -> String {
-    let url = format!("https://login.weixin.qq.com/qrcode/{}", url.as_ref());
+fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
+    let url = format!("https://login.weixin.qq.com/qrcode/{}", qr.as_ref());
     let mut response = CLIENT.get(&url).send().unwrap();
     let mut result = Vec::new();
     response.read_to_end(&mut result).unwrap();
@@ -525,9 +529,11 @@ fn save_qr_file<T: AsRef<str>>(url: T) -> String {
 
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
+    let headers = { WECHAT.read().unwrap().headers() };
+
     println!("get: {:?}", url);
     let mut response = CLIENT.get(url.as_ref())
-        .headers(WECHAT.read().unwrap().headers())
+        .headers(headers)
         .send()
         .unwrap();
     let mut result = String::new();
@@ -539,7 +545,7 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
 fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
 
-    let headers = WECHAT.read().unwrap().headers();
+    let headers = { WECHAT.read().unwrap().headers() };
     println!("post: {:?}\nheaders:{:?}\npost_data: {:?}",
              url,
              headers,
