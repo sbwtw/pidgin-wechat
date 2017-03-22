@@ -10,6 +10,7 @@ use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
+use user::User;
 use serde_json::Value;
 use serde_json::Map;
 use plugin_pointer::*;
@@ -23,6 +24,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
+use std::collections::BTreeSet;
 
 lazy_static!{
     pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
@@ -57,32 +59,11 @@ struct WeChat {
     headers: Headers,
     user_info: Value,
     sync_keys: Value,
+
+    user_list: BTreeSet<User>,
 }
 
 unsafe impl std::marker::Sync for WeChat {}
-
-#[derive(Debug)]
-struct User {
-    user_name: String,
-    nick_name: String,
-}
-
-impl User {
-    fn from_json(json: &Value) -> User {
-        User {
-            user_name: json["UserName"].as_str().unwrap().to_owned(),
-            nick_name: json["NickName"].as_str().unwrap().to_owned(),
-        }
-    }
-
-    fn user_name_str(&self) -> CString {
-        CString::new(self.user_name.clone()).unwrap()
-    }
-
-    fn nick_name_str(&self) -> CString {
-        CString::new(self.nick_name.clone()).unwrap()
-    }
-}
 
 impl WeChat {
     fn new() -> WeChat {
@@ -105,6 +86,8 @@ impl WeChat {
             headers: headers,
             user_info: Value::Null,
             sync_keys: Value::Null,
+
+            user_list: BTreeSet::new(),
         }
     }
 
@@ -196,6 +179,16 @@ impl WeChat {
 
     fn headers(&self) -> Headers {
         self.headers.clone()
+    }
+
+    fn append_user(&mut self, user: &User) {
+        if self.user_list.insert(user.clone()) {
+            SRV_MSG.0
+                .lock()
+                .unwrap()
+                .send(SrvMsg::AddContact(user.clone()))
+                .unwrap();
+        }
     }
 
     fn base_data(&self) -> Value {
@@ -309,11 +302,8 @@ fn check_scan(uuid: String) {
         wechat.set_cookies(&cookies);
     }
 
-    println!("cookies::::::::::::  {:?}",
-             WECHAT.read().unwrap().headers());
-
     // init
-    let data = WECHAT.read().unwrap().base_data();
+    let data = { WECHAT.read().unwrap().base_data() };
     let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
                       pass_ticket,
@@ -325,17 +315,14 @@ fn check_scan(uuid: String) {
         wechat.set_user_info(&json);
     }
 
-    let ref contact_list = json["ContactList"].as_array().unwrap();
-    for contact in *contact_list {
-        let is_chat = contact["MemberCount"] != json!(0);
-        if !is_chat {
-            let user = User::from_json(contact);
-
-            SRV_MSG.0
-                .lock()
-                .unwrap()
-                .send(SrvMsg::AddContact(user))
-                .unwrap();
+    {
+        let mut wechat = WECHAT.write().unwrap();
+        let ref contact_list = json["ContactList"].as_array().unwrap();
+        for contact in *contact_list {
+            let is_chat = contact["MemberCount"] != json!(0);
+            if !is_chat {
+                wechat.append_user(&User::from_json(contact));
+            }
         }
     }
 

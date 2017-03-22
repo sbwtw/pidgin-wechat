@@ -8,6 +8,7 @@ extern crate serde_json;
 
 mod plugin_pointer;
 mod server;
+mod user;
 
 use purple_sys::*;
 use std::os::raw::{c_void, c_char};
