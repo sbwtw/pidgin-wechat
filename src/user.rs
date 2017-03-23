@@ -10,6 +10,9 @@ use serde_json::Value;
 pub struct User {
     user_name: String,
     nick_name: String,
+    alias: String,
+    head_img_url: String,
+    signature: String,
 }
 
 impl User {
@@ -17,7 +20,18 @@ impl User {
         User {
             user_name: json["UserName"].as_str().unwrap().to_owned(),
             nick_name: json["NickName"].as_str().unwrap().to_owned(),
+            alias: json["Alias"].as_str().unwrap().to_owned(),
+            head_img_url: json["HeadImgUrl"].as_str().unwrap().to_owned(),
+            signature: json["Signature"].as_str().unwrap().to_owned(),
         }
+    }
+
+    pub fn alias(&self) -> &String {
+        &self.alias
+    }
+
+    pub fn nick_name(&self) -> &String {
+        &self.nick_name
     }
 
     pub fn user_name_str(&self) -> CString {

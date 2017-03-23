@@ -315,16 +315,19 @@ fn check_scan(uuid: String) {
         wechat.set_user_info(&json);
     }
 
-    {
-        let mut wechat = WECHAT.write().unwrap();
-        let ref contact_list = json["ContactList"].as_array().unwrap();
-        for contact in *contact_list {
-            let is_chat = contact["MemberCount"] != json!(0);
-            if !is_chat {
-                wechat.append_user(&User::from_json(contact));
-            }
-        }
-    }
+    // {
+    //     let mut wechat = WECHAT.write().unwrap();
+    //     let ref contact_list = json["ContactList"].as_array().unwrap();
+    //     for contact in *contact_list {
+    //         let is_chat = contact["MemberCount"] != json!(0);
+    //         if !is_chat {
+    //             wechat.append_user(&User::from_json(contact));
+    //         }
+    //     }
+    // }
+
+    // fetch contact list
+    thread::spawn(|| fetch_contact());
 
     // refersh current user name
     unsafe {
@@ -351,6 +354,21 @@ fn check_scan(uuid: String) {
 
 fn time_stamp() -> i64 {
     time::get_time().sec * 1000
+}
+
+fn fetch_contact() {
+    let url = {
+        let wechat = WECHAT.read().unwrap();
+        format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetcontact?pass_ticket={}&skey={}&r={}&seq=0", wechat.pass_ticket(), wechat.skey(), time_stamp())
+    };
+
+    let result = get(url).parse::<Value>().unwrap();
+    let ref member_list = result["MemberList"].as_array().unwrap();
+
+    let mut wechat = WECHAT.write().unwrap();
+    for member in *member_list {
+        wechat.append_user(&User::from_json(member));
+    }
 }
 
 fn sync_check() {
@@ -557,7 +575,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
     let rx = SRV_MSG.1.lock().unwrap();
 
-    if let Ok(m) = rx.try_recv() {
+    while let Ok(m) = rx.try_recv() {
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
@@ -611,7 +629,7 @@ unsafe fn append_message(json: &Value) {
 
 unsafe fn add_buddy(user: &User) {
 
-    println!("add_buddy: {:?}", user);
+    println!("add_buddy: {} ({})", user.nick_name(), user.alias());
 
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
     let group_name = CString::new("Wechat").unwrap();
