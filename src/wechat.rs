@@ -106,7 +106,7 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
     (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
 
-    let chat_group = CString::new("WeChat Groups").unwrap();
+    let chat_group = CString::new("Wechat Groups").unwrap();
     let group = purple_group_new(chat_group.as_ptr());
     (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
