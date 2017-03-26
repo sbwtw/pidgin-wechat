@@ -543,7 +543,11 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
         .unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    println!("result: {}", result);
+    if result.len() > 500 {
+        println!("result: {}", &result[0..300]);
+    } else {
+        println!("result: {}", result);
+    }
 
     result
 }
@@ -586,6 +590,23 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
     1
 }
 
+// unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
+//     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+//     let name = CString::new(name).unwrap();
+//     let conv = purple_find_conversation_with_account(conv_type, name.as_ptr(), account);
+
+//     if conv == null_mut() {
+//         purple_conversation_new(conv_type, account, name.as_ptr())
+//     } else {
+//         conv
+//     }
+// }
+
+// unsafe fn conv_chat(name: &str) -> *mut PurpleConvChat {
+//     let conv = conversion(PURPLE_CONV_TYPE_CHAT, name);
+//     purple_conversation_get_chat_data(conv)
+// }
+
 unsafe fn append_message(json: &Value) {
     if let Value::Array(ref list) = json["AddMsgList"] {
 
@@ -606,22 +627,32 @@ unsafe fn append_message(json: &Value) {
 
             let content = CString::new(msg["Content"].as_str().unwrap()).unwrap();
             let from = msg["FromUserName"].as_str().unwrap();
-            let to = CString::new(msg["ToUserName"].as_str().unwrap()).unwrap();
+            let dest = msg["ToUserName"].as_str().unwrap();
+            let to = CString::new(dest).unwrap();
             let time = msg["CreateTime"].as_i64().unwrap();
 
-            if self_name != from {
+            println!("chat message: {:?}", msg);
+
+            if dest.starts_with("@@") {
+                // got chat room message
+                // let chat = conv_chat(dest);
                 let from = CString::new(from).unwrap();
-                serv_got_im(gc,
-                            from.as_ptr(),
-                            content.as_ptr(),
-                            PURPLE_MESSAGE_RECV,
-                            time);
+                // purple_conv_chat_write(chat, from.as_ptr(), content.as_ptr(), PURPLE_MESSAGE_RECV, time);
             } else {
-                serv_got_im(gc,
-                            to.as_ptr(),
-                            content.as_ptr(),
-                            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_WHISPER,
-                            time);
+                if self_name != from {
+                    let from = CString::new(from).unwrap();
+                    serv_got_im(gc,
+                                from.as_ptr(),
+                                content.as_ptr(),
+                                PURPLE_MESSAGE_RECV,
+                                time);
+                } else {
+                    serv_got_im(gc,
+                                to.as_ptr(),
+                                content.as_ptr(),
+                                PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_WHISPER,
+                                time);
+                }
             }
         }
     }
@@ -645,6 +676,8 @@ unsafe fn add_buddy(user: &User) {
     let available = CString::new("available").unwrap();
     purple_prpl_got_user_status(account, user_name.as_ptr(), available.as_ptr());
 }
+
+unsafe fn add_chat() {}
 
 pub fn login() {
 
