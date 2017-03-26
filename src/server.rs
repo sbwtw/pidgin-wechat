@@ -10,6 +10,8 @@ use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
+use glib_sys;
+use libc;
 use user::User;
 use serde_json::Value;
 use serde_json::Map;
@@ -629,8 +631,24 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
     1
 }
 
-fn add_group(json: &Value) {
-    println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
+unsafe fn add_group(json: &Value) {
+    // println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
+    let free_func = Some(std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void), unsafe extern "C" fn(*mut libc::c_void)>(g_free));
+    let components = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash), Some(glib_sys::g_str_equal), free_func, free_func);
+    let account = { ACCOUNT.read().unwrap().as_ptr() };
+    let chat_name = json["UserName"].as_str().unwrap();
+    let chat = CString::new(chat_name).unwrap();
+    let alias_name = json["NickName"].as_str().unwrap();
+    let alias = CString::new(alias_name).unwrap();
+    let group_name = CString::new("Wechat Groups").unwrap();
+    let group = purple_find_group(group_name.as_ptr());
+    let chat = purple_chat_new(account as *mut PurpleAccount, chat.as_ptr(), components as *mut GHashTable);
+
+    println!("add chat: {} ({})", alias_name, chat_name);
+
+    purple_blist_add_chat(chat, group, null_mut());
+    purple_blist_alias_chat(chat, alias.as_ptr());
+    purple_blist_node_set_flags(chat as *mut PurpleBlistNode, PURPLE_BLIST_NODE_FLAG_NO_SAVE);
 }
 
 // unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
