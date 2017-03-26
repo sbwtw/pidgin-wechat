@@ -43,6 +43,7 @@ lazy_static!{
 enum SrvMsg {
     ShowVerifyImage(String),
     AddContact(User),
+    AddGroup(Value),
     MessageReceived(Value),
 }
 
@@ -217,6 +218,22 @@ impl WeChat {
         value
     }
 
+    fn group_info_data(&self, groups: &[String]) -> Value {
+
+        let mut list = vec![];
+        for id in groups {
+            let item = json!({ "UserName": json!(id),
+                               "ChatRoomId": json!("") });
+            list.push(item);
+        }
+
+        let mut value = self.base_data();
+        value["Count"] = json!(groups.len());
+        value["List"] = json!(list);
+
+        value
+    }
+
     fn message_check_data(&self) -> Value {
 
         let mut value = self.base_data();
@@ -303,7 +320,9 @@ fn check_scan(uuid: String) {
     }
 
     // init
-    let data = { WECHAT.read().unwrap().base_data() };
+    let data = {
+        WECHAT.read().unwrap().base_data()
+    };
     let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
                       pass_ticket,
@@ -315,16 +334,31 @@ fn check_scan(uuid: String) {
         wechat.set_user_info(&json);
     }
 
-    // {
-    //     let mut wechat = WECHAT.write().unwrap();
-    //     let ref contact_list = json["ContactList"].as_array().unwrap();
-    //     for contact in *contact_list {
-    //         let is_chat = contact["MemberCount"] != json!(0);
-    //         if !is_chat {
-    //             wechat.append_user(&User::from_json(contact));
-    //         }
-    //     }
-    // }
+    let ref contact_list = json["ContactList"].as_array().unwrap();
+    let mut groups = vec![];
+    for contact in *contact_list {
+        let name = contact["UserName"].as_str().unwrap();
+        if name.starts_with("@@") {
+            groups.push(name.to_owned());
+        }
+    }
+
+    let (url, data) = {
+        let wechat = WECHAT.read().unwrap();
+        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxbatchgetcontact?type=ex&r={}&pass_ticket={}", time_stamp(), wechat.pass_ticket());
+        let data = wechat.group_info_data(&groups[..]);
+
+        (url, data)
+    };
+    let result = post(&url, &data);
+    let json = result.parse::<Value>().unwrap();
+    let ref groups = json["ContactList"].as_array().unwrap();
+    if groups.len() != 0 {
+        let tx = SRV_MSG.0.lock().unwrap();
+        for group in *groups {
+            tx.send(SrvMsg::AddGroup(group.clone()));
+        }
+    }
 
     // fetch contact list
     thread::spawn(|| fetch_contact());
@@ -534,7 +568,9 @@ fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
 
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
-    let headers = { WECHAT.read().unwrap().headers() };
+    let headers = {
+        WECHAT.read().unwrap().headers()
+    };
 
     println!("get: {:?}", url);
     let mut response = CLIENT.get(url.as_ref())
@@ -554,7 +590,9 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
 fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
 
-    let headers = { WECHAT.read().unwrap().headers() };
+    let headers = {
+        WECHAT.read().unwrap().headers()
+    };
     println!("post: {:?}\nheaders:{:?}\npost_data: {:?}",
              url,
              headers,
@@ -583,11 +621,16 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
+            SrvMsg::AddGroup(json) => add_group(&json),
             SrvMsg::MessageReceived(json) => append_message(&json),
         }
     }
 
     1
+}
+
+fn add_group(json: &Value) {
+    println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
 }
 
 // unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
