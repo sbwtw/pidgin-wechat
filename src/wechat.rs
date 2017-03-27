@@ -83,6 +83,8 @@ extern "C" fn status_types(_: *mut PurpleAccount) -> *mut GList {
 
 unsafe extern "C" fn login(account: *mut PurpleAccount) {
 
+    println!("account: {:?}", account);
+
     ACCOUNT.write().unwrap().set(account as *mut c_void);
 
     purple_connection_set_state(purple_account_get_connection(account), PURPLE_CONNECTED);
@@ -104,13 +106,13 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
     (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
 
-    let name = CString::new("name").unwrap();
-    let buddy = purple_buddy_new(account, name.as_ptr(), null_mut());
-    (*buddy).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
-    purple_blist_add_buddy(buddy, null_mut(), group, null_mut());
+    // let name = CString::new("name").unwrap();
+    // let buddy = purple_buddy_new(account, name.as_ptr(), null_mut());
+    // (*buddy).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
+    // purple_blist_add_buddy(buddy, null_mut(), group, null_mut());
 
-    let available = CString::new("available").unwrap();
-    purple_prpl_got_user_status(account, name.as_ptr(), available.as_ptr());
+    // let available = CString::new("available").unwrap();
+    // purple_prpl_got_user_status(account, name.as_ptr(), available.as_ptr());
 
     std::thread::spawn(|| { server::login(); });
 }
@@ -129,8 +131,7 @@ extern "C" fn chat_info_defaults(_: *mut PurpleConnection, _: *const c_char) -> 
     table
 }
 
-extern "C" fn close(_: *mut PurpleConnection) {
-}
+extern "C" fn close(_: *mut PurpleConnection) {}
 
 extern "C" fn buddy_list(gc: *mut PurpleConnection) -> *mut PurpleRoomlist {
 
