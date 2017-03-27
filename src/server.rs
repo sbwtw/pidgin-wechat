@@ -44,6 +44,7 @@ enum SrvMsg {
     ShowVerifyImage(String),
     AddContact(User),
     MessageReceived(Value),
+    YieldEvent,
 }
 
 // #[derive(Debug)]
@@ -303,7 +304,9 @@ fn check_scan(uuid: String) {
     }
 
     // init
-    let data = { WECHAT.read().unwrap().base_data() };
+    let data = {
+        WECHAT.read().unwrap().base_data()
+    };
     let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
                       pass_ticket,
@@ -364,6 +367,15 @@ fn fetch_contact() {
 
     let result = get(url).parse::<Value>().unwrap();
     let ref member_list = result["MemberList"].as_array().unwrap();
+
+    // yield event loop
+    {
+        SRV_MSG.0
+            .lock()
+            .unwrap()
+            .send(SrvMsg::YieldEvent)
+            .unwrap();
+    }
 
     let mut wechat = WECHAT.write().unwrap();
     for member in *member_list {
@@ -534,7 +546,9 @@ fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
 
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
-    let headers = { WECHAT.read().unwrap().headers() };
+    let headers = {
+        WECHAT.read().unwrap().headers()
+    };
 
     println!("get: {:?}", url);
     let mut response = CLIENT.get(url.as_ref())
@@ -550,7 +564,9 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
 fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
 
-    let headers = { WECHAT.read().unwrap().headers() };
+    let headers = {
+        WECHAT.read().unwrap().headers()
+    };
     println!("post: {:?}\nheaders:{:?}\npost_data: {:?}",
              url,
              headers,
@@ -580,6 +596,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
             SrvMsg::MessageReceived(json) => append_message(&json),
+            SrvMsg::YieldEvent => break,
         }
     }
 
@@ -643,8 +660,21 @@ unsafe fn add_buddy(user: &User) {
 
     // set status to available
     let available = CString::new("available").unwrap();
-    purple_prpl_got_user_status(account, user_name.as_ptr(), available.as_ptr());
+    purple_prpl_got_user_status(account,
+                                user_name.as_ptr(),
+                                available.as_ptr(),
+                                null_mut() as *mut c_void);
 }
+
+// fn set_buddy_online(user: &User) {
+//     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+//     let available = CString::new("available").unwrap();
+//     let user_name = user.user_name_str();
+
+//     unsafe {
+//         purple_prpl_got_user_status(account, user_name.as_ptr(), available.as_ptr());
+//     }
+// }
 
 pub fn login() {
 
