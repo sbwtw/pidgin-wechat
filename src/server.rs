@@ -13,6 +13,7 @@ use self::regex::Regex;
 use glib_sys;
 use libc;
 use user::User;
+use chatroom::ChatRoom;
 use serde_json::Value;
 use serde_json::Map;
 use plugin_pointer::*;
@@ -45,7 +46,7 @@ lazy_static!{
 enum SrvMsg {
     ShowVerifyImage(String),
     AddContact(User),
-    AddGroup(Value),
+    AddGroup(ChatRoom),
     MessageReceived(Value),
     YieldEvent,
 }
@@ -65,6 +66,7 @@ struct WeChat {
     sync_keys: Value,
 
     user_list: BTreeSet<User>,
+    chat_list: BTreeSet<ChatRoom>,
 }
 
 unsafe impl std::marker::Sync for WeChat {}
@@ -92,6 +94,7 @@ impl WeChat {
             sync_keys: Value::Null,
 
             user_list: BTreeSet::new(),
+            chat_list: BTreeSet::new(),
         }
     }
 
@@ -191,6 +194,16 @@ impl WeChat {
                 .lock()
                 .unwrap()
                 .send(SrvMsg::AddContact(user.clone()))
+                .unwrap();
+        }
+    }
+
+    fn append_chat(&mut self, chat: &ChatRoom) {
+        if self.chat_list.insert(chat.clone()) {
+            SRV_MSG.0
+                .lock()
+                .unwrap()
+                .send(SrvMsg::AddGroup(chat.clone()))
                 .unwrap();
         }
     }
@@ -359,9 +372,9 @@ fn check_scan(uuid: String) {
     let json = result.parse::<Value>().unwrap();
     let ref groups = json["ContactList"].as_array().unwrap();
     if groups.len() != 0 {
-        let tx = SRV_MSG.0.lock().unwrap();
+        let mut wechat = WECHAT.write().unwrap();
         for group in *groups {
-            tx.send(SrvMsg::AddGroup(group.clone()));
+            wechat.append_chat(&ChatRoom::from_json(group));
         }
     }
 
@@ -496,7 +509,7 @@ pub unsafe extern "C" fn send_chat(gc: *mut PurpleConnection,
 
     println!("send_chat: {:?}, {:?}", id, msg);
 
-    1
+    0
 }
 
 pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
@@ -647,7 +660,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
-            SrvMsg::AddGroup(json) => add_group(&json),
+            SrvMsg::AddGroup(chat) => add_group(&chat),
             SrvMsg::MessageReceived(json) => append_message(&json),
             SrvMsg::YieldEvent => break,
         }
@@ -656,53 +669,87 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
     1
 }
 
-unsafe fn add_group(json: &Value) {
-    // println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
-    let free_func = Some(std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void),
-                                               unsafe extern "C" fn(*mut libc::c_void)>(g_free));
-    let components = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash),
+unsafe fn add_group(chat: &ChatRoom) {
+
+    println!("add group: {} {}", chat.alias(), chat.token());
+
+    let free = std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void),
+                                     unsafe extern "C" fn(*mut libc::c_void)>(g_free);
+
+    let hash_table = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash),
                                                      Some(glib_sys::g_str_equal),
-                                                     free_func,
-                                                     free_func);
+                                                     Some(free),
+                                                     Some(free)) as
+                     *mut GHashTable;
+
+    let id_key = CString::new("ChatId").unwrap();
+    let id = chat.id_cstring();
+    g_hash_table_insert(hash_table,
+                        g_strdup(id_key.as_ptr()) as *mut c_void,
+                        g_strdup(id.as_ptr()) as *mut c_void);
+
     let account = {
         ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount
     };
-    let chat_key = CString::new("ChatId").unwrap();
-    let chat_name = json["UserName"].as_str().unwrap();
-    let chat = CString::new(chat_name).unwrap();
-    let alias_name = json["NickName"].as_str().unwrap();
-    let alias = CString::new(alias_name).unwrap();
+
+    let chat_ptr = purple_chat_new(account as *mut PurpleAccount, id.as_ptr(), hash_table);
+
+    let alias = chat.alias_cstring();
     let group_name = CString::new("Wechat Groups").unwrap();
     let group = purple_find_group(group_name.as_ptr());
-    let chat_ptr = purple_chat_new(account as *mut PurpleAccount,
-                                   chat.as_ptr(),
-                                   components as *mut GHashTable);
-
-    g_hash_table_insert(components as *mut GHashTable,
-                        g_strdup(chat_key.as_ptr()) as *mut c_void,
-                        g_strdup(alias.as_ptr()) as *mut c_void);
-
-    println!("add chat: {:?} {} ({})", chat_ptr, alias_name, chat_name);
-
-    // let conversation = purple_conversation_new(PURPLE_CONV_TYPE_CHAT, account, chat.as_ptr());
-    // println!("conv: {:?}", conversation);
-
     purple_blist_add_chat(chat_ptr, group, null_mut());
     purple_blist_alias_chat(chat_ptr, alias.as_ptr());
     purple_blist_node_set_flags(chat_ptr as *mut PurpleBlistNode,
                                 PURPLE_BLIST_NODE_FLAG_NO_SAVE);
-
-    // serv_got_joined_chat(purple_account_get_connection(account), 0, chat.as_ptr());
-
-
-    // let id = purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation));
-
-    // println!("id: {:?}", id);
-
-    // serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
-    //  id,
-    //  chat.as_ptr());
 }
+
+// unsafe fn add_group_(json: &Value) {
+// println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
+//     let free_func = Some(std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void),
+//                                                unsafe extern "C" fn(*mut libc::c_void)>(g_free));
+//     let components = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash),
+//                                                      Some(glib_sys::g_str_equal),
+//                                                      free_func,
+//                                                      free_func);
+//     let account = {
+//         ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount
+//     };
+//     let chat_key = CString::new("ChatId").unwrap();
+//     let chat_name = json["UserName"].as_str().unwrap();
+//     let chat = CString::new(chat_name).unwrap();
+//     let alias_name = json["NickName"].as_str().unwrap();
+//     let alias = CString::new(alias_name).unwrap();
+//     let group_name = CString::new("Wechat Groups").unwrap();
+//     let group = purple_find_group(group_name.as_ptr());
+//     let chat_ptr = purple_chat_new(account as *mut PurpleAccount,
+//                                    chat.as_ptr(),
+//                                    components as *mut GHashTable);
+
+//     g_hash_table_insert(components as *mut GHashTable,
+//                         g_strdup(chat_key.as_ptr()) as *mut c_void,
+//                         g_strdup(chat.as_ptr()) as *mut c_void);
+
+//     println!("add chat: {:?} {} ({})", chat_ptr, alias_name, chat_name);
+
+// let conversation = purple_conversation_new(PURPLE_CONV_TYPE_CHAT, account, chat.as_ptr());
+// println!("conv: {:?}", conversation);
+
+// purple_blist_add_chat(chat_ptr, group, null_mut());
+// purple_blist_alias_chat(chat_ptr, alias.as_ptr());
+// purple_blist_node_set_flags(chat_ptr as *mut PurpleBlistNode,
+//                             PURPLE_BLIST_NODE_FLAG_NO_SAVE);
+
+// serv_got_joined_chat(purple_account_get_connection(account), 0, chat.as_ptr());
+
+
+// let id = purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation));
+
+// println!("id: {:?}", id);
+
+// serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
+//  id,
+//  chat.as_ptr());
+// }
 
 pub unsafe extern "C" fn find_blist_chat(account: *mut PurpleAccount,
                                          name: *const c_char)
@@ -814,8 +861,6 @@ unsafe fn add_buddy(user: &User) {
 //         purple_prpl_got_user_status(account, user_name.as_ptr(), available.as_ptr());
 //     }
 // }
-
-unsafe fn add_chat() {}
 
 pub fn login() {
 
