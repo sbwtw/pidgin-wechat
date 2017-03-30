@@ -1,23 +1,26 @@
 
 extern crate std;
 
+use std::os::raw::c_void;
 use std::ffi::CString;
 use std::cmp::*;
 use std::sync::atomic;
 use std::sync::atomic::AtomicUsize;
 
+use pointer::Pointer;
 use serde_json::Value;
 
 lazy_static!{
     static ref TOKEN: AtomicUsize = AtomicUsize::new(1);
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct ChatRoom {
     id: String,
     alias: String,
 
     token: usize,
+    ptr: Pointer,
 }
 
 impl ChatRoom {
@@ -28,6 +31,7 @@ impl ChatRoom {
             alias: json["NickName"].as_str().unwrap().to_owned(),
 
             token: TOKEN.fetch_add(1, atomic::Ordering::SeqCst),
+            ptr: Pointer::new(),
         }
     }
 
@@ -46,23 +50,35 @@ impl ChatRoom {
     pub fn alias(&self) -> String {
         self.alias.clone()
     }
+
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    pub fn set_chat_ptr(&mut self, chat: *mut c_void) {
+        self.ptr.set(chat);
+    }
+
+    pub fn chat_ptr(&self) -> *mut c_void {
+        self.ptr.as_ptr()
+    }
 }
 
 impl Ord for ChatRoom {
     fn cmp(&self, other: &ChatRoom) -> Ordering {
-        self.id.cmp(&other.id)
+        self.token.cmp(&other.token)
     }
 }
 
 impl PartialOrd for ChatRoom {
     fn partial_cmp(&self, other: &ChatRoom) -> Option<Ordering> {
-        Some(self.id.cmp(&other.id))
+        Some(self.token.cmp(&other.token))
     }
 }
 
 impl PartialEq for ChatRoom {
     fn eq(&self, other: &ChatRoom) -> bool {
-        self.id == other.id
+        self.token == other.token
     }
 }
 

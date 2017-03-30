@@ -16,7 +16,7 @@ use user::User;
 use chatroom::ChatRoom;
 use serde_json::Value;
 use serde_json::Map;
-use plugin_pointer::*;
+use pointer::*;
 use purple_sys::*;
 use std::os::raw::{c_void, c_char, c_int};
 use std::io::*;
@@ -30,7 +30,7 @@ use std::fmt::Debug;
 use std::collections::BTreeSet;
 
 lazy_static!{
-    pub static ref ACCOUNT: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
+    pub static ref ACCOUNT: RwLock<Pointer> = RwLock::new(Pointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
     static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
@@ -206,6 +206,53 @@ impl WeChat {
                 .send(SrvMsg::AddGroup(chat.clone()))
                 .unwrap();
         }
+    }
+
+    fn set_chat_ptr(&mut self, chat: &ChatRoom, chat_ptr: *mut PurpleChat) {
+        if let Some(mut c) = self.chat_list.take(chat) {
+            c.set_chat_ptr(chat_ptr as *mut c_void);
+            assert!(self.chat_list.insert(c));
+        } else {
+            println!("set chat ptr error, {:?}", chat);
+        }
+    }
+
+    fn find_chat_by_token(&self, token: usize) -> Option<&ChatRoom> {
+        for ref c in self.chat_list.iter() {
+            if c.token() == token {
+                return Some(c);
+            }
+        }
+
+        None
+    }
+
+    fn find_chat_by_id(&self, id: &str) -> Option<&ChatRoom> {
+        for ref c in self.chat_list.iter() {
+            if c.id() == id {
+                return Some(c);
+            }
+        }
+
+        None
+    }
+
+    fn find_chat_token(&self, id: &str) -> usize {
+
+        if let Some(c) = self.find_chat_by_id(id) {
+            return c.token();
+        }
+
+        0
+    }
+
+    fn find_chat_ptr(&self, id: &str) -> *mut PurpleChat {
+
+        if let Some(c) = self.find_chat_by_id(id) {
+            return c.chat_ptr() as *mut PurpleChat;
+        }
+
+        null_mut()
     }
 
     fn base_data(&self) -> Value {
@@ -694,6 +741,10 @@ unsafe fn add_group(chat: &ChatRoom) {
 
     let chat_ptr = purple_chat_new(account as *mut PurpleAccount, id.as_ptr(), hash_table);
 
+    {
+        WECHAT.write().unwrap().set_chat_ptr(chat, chat_ptr);
+    }
+
     let alias = chat.alias_cstring();
     let group_name = CString::new("Wechat Groups").unwrap();
     let group = purple_find_group(group_name.as_ptr());
@@ -751,15 +802,20 @@ unsafe fn add_group(chat: &ChatRoom) {
 //  chat.as_ptr());
 // }
 
-pub unsafe extern "C" fn find_blist_chat(account: *mut PurpleAccount,
+pub unsafe extern "C" fn find_blist_chat(_: *mut PurpleAccount,
                                          name: *const c_char)
                                          -> *mut PurpleChat {
-
     let name = CStr::from_ptr(name);
 
-    println!("find_blist_chat: {:?}, {:?}", account, name);
+    let chat_ptr = WECHAT.read().unwrap().find_chat_ptr(name.to_string_lossy().to_mut());
 
-    null_mut()
+    chat_ptr
+}
+
+pub fn find_chat_token(id: &str) -> usize {
+    let token = WECHAT.read().unwrap().find_chat_token(id);
+
+    token
 }
 
 // unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {

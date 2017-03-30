@@ -3,14 +3,14 @@ extern crate std;
 
 use std::os::raw::c_void;
 
-#[derive(Copy, Clone)]
-pub struct GlobalPointer {
+#[derive(Copy, Clone, Debug)]
+pub struct Pointer {
     pointer: usize,
 }
 
-impl GlobalPointer {
-    pub fn new() -> GlobalPointer {
-        GlobalPointer { pointer: 0 }
+impl Pointer {
+    pub fn new() -> Pointer {
+        Pointer { pointer: 0 }
     }
 
     pub fn set(&mut self, ptr: *mut c_void) -> Self {
@@ -26,4 +26,4 @@ impl GlobalPointer {
     }
 }
 
-unsafe impl std::marker::Send for GlobalPointer {}
+unsafe impl std::marker::Send for Pointer {}

@@ -6,7 +6,7 @@ extern crate lazy_static;
 #[macro_use]
 extern crate serde_json;
 
-mod plugin_pointer;
+mod pointer;
 mod server;
 mod user;
 mod chatroom;
@@ -17,15 +17,15 @@ use std::ptr::null_mut;
 use std::boxed::Box;
 use std::ffi::{CString, CStr};
 use std::sync::RwLock;
-use plugin_pointer::GlobalPointer;
+use pointer::Pointer;
 use server::ACCOUNT;
-use server::{send_im, send_chat, find_blist_chat};
+use server::{send_im, send_chat, find_blist_chat, find_chat_token};
 
 const TRUE: i32 = 1;
 const FALSE: i32 = 0;
 
 lazy_static!{
-    static ref PLUGIN: RwLock<GlobalPointer> = RwLock::new(GlobalPointer::new());
+    static ref PLUGIN: RwLock<Pointer> = RwLock::new(Pointer::new());
     static ref ICON_FILE: CString = CString::new("icq").unwrap();
     static ref WECHAT_CATEGORY: CString = CString::new("Wechat").unwrap();
 }
@@ -136,8 +136,9 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
     let chat_key = CString::new("ChatId").unwrap();
     let id = CStr::from_ptr(g_hash_table_lookup(components, chat_key.as_ptr() as *const c_void) as
                             *const i8);
+    let token = find_chat_token(id.to_string_lossy().to_mut());
 
-    println!("id = {:?}", id);
+    println!("id = {:?}, token = {}", id, token);
 
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
 
@@ -146,7 +147,9 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
     // purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, id.as_ptr(), account);
     // println!("conv: {:?}", conversation);
 
-    serv_got_joined_chat(purple_account_get_connection(account), 1, id.as_ptr());
+    serv_got_joined_chat(purple_account_get_connection(account),
+                         token as i32,
+                         id.as_ptr());
     // serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
     //                      purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation)),
     //                      id.as_ptr());
