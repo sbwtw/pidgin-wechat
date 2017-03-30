@@ -283,13 +283,13 @@ pub fn start_login() {
 }
 
 fn check_scan(uuid: String) {
-    let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+    let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
                       1);
     // TODO: check result
     let _ = get(&url);
 
-    let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+    let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
                       0);
 
@@ -301,10 +301,12 @@ fn check_scan(uuid: String) {
     let uri = caps.get(1).unwrap().as_str();
 
     // webwxnewloginpage
-    let url = format!("{}&fun=new", uri);
+    let url = format!("{}&fun=new&version=v2", uri);
+    println!("login with: {}", url);
     let mut response = CLIENT.get(&url).send().unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
+    println!("login result: {}", result);
     let cookies = response.headers.get::<SetCookie>().unwrap();
 
     let skey = regex_cap(&result, r#"<skey>(.*)</skey>"#);
@@ -474,6 +476,19 @@ fn sync_check() {
     }
 }
 
+pub unsafe extern "C" fn send_chat(gc: *mut PurpleConnection,
+                                   id: i32,
+                                   msg: *const c_char,
+                                   flags: PurpleMessageFlags)
+                                   -> c_int {
+
+    let msg = CStr::from_ptr(msg);
+
+    println!("send_chat: {:?}, {:?}", id, msg);
+
+    1
+}
+
 pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
                                  who: *const c_char,
                                  msg: *const c_char,
@@ -537,10 +552,8 @@ fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
 }
 
 fn get_uuid() -> String {
-    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb";
-    let mut response = CLIENT.get(url).send().unwrap();
-    let mut result = String::new();
-    response.read_to_string(&mut result).unwrap();
+    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
+    let result = get(&url);
 
     let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
@@ -552,7 +565,8 @@ fn get_uuid() -> String {
 }
 
 fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
-    let url = format!("https://login.weixin.qq.com/qrcode/{}", qr.as_ref());
+    let url = format!("https://login.web.wechat.com/qrcode/{}", qr.as_ref());
+    println!("get qr file: {}", url);
     let mut response = CLIENT.get(&url).send().unwrap();
     let mut result = Vec::new();
     response.read_to_end(&mut result).unwrap();
@@ -633,22 +647,61 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
 unsafe fn add_group(json: &Value) {
     // println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
-    let free_func = Some(std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void), unsafe extern "C" fn(*mut libc::c_void)>(g_free));
-    let components = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash), Some(glib_sys::g_str_equal), free_func, free_func);
-    let account = { ACCOUNT.read().unwrap().as_ptr() };
+    let free_func = Some(std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void),
+                                               unsafe extern "C" fn(*mut libc::c_void)>(g_free));
+    let components = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash),
+                                                     Some(glib_sys::g_str_equal),
+                                                     free_func,
+                                                     free_func);
+    let account = {
+        ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount
+    };
+    let chat_key = CString::new("ChatId").unwrap();
     let chat_name = json["UserName"].as_str().unwrap();
     let chat = CString::new(chat_name).unwrap();
     let alias_name = json["NickName"].as_str().unwrap();
     let alias = CString::new(alias_name).unwrap();
     let group_name = CString::new("Wechat Groups").unwrap();
     let group = purple_find_group(group_name.as_ptr());
-    let chat = purple_chat_new(account as *mut PurpleAccount, chat.as_ptr(), components as *mut GHashTable);
+    let chat_ptr = purple_chat_new(account as *mut PurpleAccount,
+                                   chat.as_ptr(),
+                                   components as *mut GHashTable);
 
-    println!("add chat: {} ({})", alias_name, chat_name);
+    g_hash_table_insert(components as *mut GHashTable,
+                        g_strdup(chat_key.as_ptr()) as *mut c_void,
+                        g_strdup(alias.as_ptr()) as *mut c_void);
 
-    purple_blist_add_chat(chat, group, null_mut());
-    purple_blist_alias_chat(chat, alias.as_ptr());
-    purple_blist_node_set_flags(chat as *mut PurpleBlistNode, PURPLE_BLIST_NODE_FLAG_NO_SAVE);
+    println!("add chat: {:?} {} ({})", chat_ptr, alias_name, chat_name);
+
+    // let conversation = purple_conversation_new(PURPLE_CONV_TYPE_CHAT, account, chat.as_ptr());
+    // println!("conv: {:?}", conversation);
+
+    purple_blist_add_chat(chat_ptr, group, null_mut());
+    purple_blist_alias_chat(chat_ptr, alias.as_ptr());
+    purple_blist_node_set_flags(chat_ptr as *mut PurpleBlistNode,
+                                PURPLE_BLIST_NODE_FLAG_NO_SAVE);
+
+    // serv_got_joined_chat(purple_account_get_connection(account), 0, chat.as_ptr());
+
+
+    // let id = purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation));
+
+    // println!("id: {:?}", id);
+
+    // serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
+    //  id,
+    //  chat.as_ptr());
+}
+
+pub unsafe extern "C" fn find_blist_chat(account: *mut PurpleAccount,
+                                         name: *const c_char)
+                                         -> *mut PurpleChat {
+
+    let name = CStr::from_ptr(name);
+
+    println!("find_blist_chat: {:?}, {:?}", account, name);
+
+    null_mut()
 }
 
 // unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
