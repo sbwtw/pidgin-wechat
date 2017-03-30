@@ -14,11 +14,11 @@ use purple_sys::*;
 use std::os::raw::{c_void, c_char};
 use std::ptr::null_mut;
 use std::boxed::Box;
-use std::ffi::CString;
+use std::ffi::{CString, CStr};
 use std::sync::RwLock;
 use plugin_pointer::GlobalPointer;
 use server::ACCOUNT;
-use server::send_im;
+use server::{send_im, send_chat, find_blist_chat};
 
 const TRUE: i32 = 1;
 const FALSE: i32 = 0;
@@ -106,6 +106,11 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
     (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
 
+    let chat_group = CString::new("Wechat Groups").unwrap();
+    let group = purple_group_new(chat_group.as_ptr());
+    (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
+    purple_blist_add_group(group, null_mut());
+
     // let name = CString::new("name").unwrap();
     // let buddy = purple_buddy_new(account, name.as_ptr(), null_mut());
     // (*buddy).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
@@ -122,6 +127,28 @@ extern "C" fn chat_info(_: *mut PurpleConnection) -> *mut GList {
     let list: *mut GList = null_mut();
 
     list
+}
+
+unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHashTable) {
+    println!("join_chat: {:?}, {:?}", gc, components);
+
+    let chat_key = CString::new("ChatId").unwrap();
+    let id = CStr::from_ptr(g_hash_table_lookup(components, chat_key.as_ptr() as *const c_void) as
+                            *const i8);
+
+    println!("id = {:?}", id);
+
+    let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+
+    // set to joined
+    // let conversation =
+    // purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, id.as_ptr(), account);
+    // println!("conv: {:?}", conversation);
+
+    serv_got_joined_chat(purple_account_get_connection(account), 1, id.as_ptr());
+    // serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
+    //                      purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation)),
+    //                      id.as_ptr());
 }
 
 extern "C" fn chat_info_defaults(_: *mut PurpleConnection, _: *const c_char) -> *mut GHashTable {
@@ -225,6 +252,9 @@ pub extern "C" fn purple_init_plugin(plugin: *mut PurplePlugin) -> i32 {
         extra_info.roomlist_get_list = Some(buddy_list);
         extra_info.chat_info = Some(chat_info);
         extra_info.chat_info_defaults = Some(chat_info_defaults);
+        extra_info.chat_send = Some(send_chat);
+        extra_info.join_chat = Some(join_chat);
+        extra_info.find_blist_chat = Some(find_blist_chat);
         extra_info.send_im = Some(send_im);
 
         info.load = Some(callback);

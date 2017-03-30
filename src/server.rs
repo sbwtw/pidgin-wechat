@@ -10,6 +10,8 @@ use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
+use glib_sys;
+use libc;
 use user::User;
 use serde_json::Value;
 use serde_json::Map;
@@ -43,6 +45,7 @@ lazy_static!{
 enum SrvMsg {
     ShowVerifyImage(String),
     AddContact(User),
+    AddGroup(Value),
     MessageReceived(Value),
     YieldEvent,
 }
@@ -218,6 +221,22 @@ impl WeChat {
         value
     }
 
+    fn group_info_data(&self, groups: &[String]) -> Value {
+
+        let mut list = vec![];
+        for id in groups {
+            let item = json!({ "UserName": json!(id),
+                               "ChatRoomId": json!("") });
+            list.push(item);
+        }
+
+        let mut value = self.base_data();
+        value["Count"] = json!(groups.len());
+        value["List"] = json!(list);
+
+        value
+    }
+
     fn message_check_data(&self) -> Value {
 
         let mut value = self.base_data();
@@ -265,13 +284,13 @@ pub fn start_login() {
 }
 
 fn check_scan(uuid: String) {
-    let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+    let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
                       1);
     // TODO: check result
     let _ = get(&url);
 
-    let url = format!("https://login.weixin.qq.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+    let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
                       0);
 
@@ -283,10 +302,12 @@ fn check_scan(uuid: String) {
     let uri = caps.get(1).unwrap().as_str();
 
     // webwxnewloginpage
-    let url = format!("{}&fun=new", uri);
+    let url = format!("{}&fun=new&version=v2", uri);
+    println!("login with: {}", url);
     let mut response = CLIENT.get(&url).send().unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
+    println!("login result: {}", result);
     let cookies = response.headers.get::<SetCookie>().unwrap();
 
     let skey = regex_cap(&result, r#"<skey>(.*)</skey>"#);
@@ -318,16 +339,31 @@ fn check_scan(uuid: String) {
         wechat.set_user_info(&json);
     }
 
-    // {
-    //     let mut wechat = WECHAT.write().unwrap();
-    //     let ref contact_list = json["ContactList"].as_array().unwrap();
-    //     for contact in *contact_list {
-    //         let is_chat = contact["MemberCount"] != json!(0);
-    //         if !is_chat {
-    //             wechat.append_user(&User::from_json(contact));
-    //         }
-    //     }
-    // }
+    let ref contact_list = json["ContactList"].as_array().unwrap();
+    let mut groups = vec![];
+    for contact in *contact_list {
+        let name = contact["UserName"].as_str().unwrap();
+        if name.starts_with("@@") {
+            groups.push(name.to_owned());
+        }
+    }
+
+    let (url, data) = {
+        let wechat = WECHAT.read().unwrap();
+        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxbatchgetcontact?type=ex&r={}&pass_ticket={}", time_stamp(), wechat.pass_ticket());
+        let data = wechat.group_info_data(&groups[..]);
+
+        (url, data)
+    };
+    let result = post(&url, &data);
+    let json = result.parse::<Value>().unwrap();
+    let ref groups = json["ContactList"].as_array().unwrap();
+    if groups.len() != 0 {
+        let tx = SRV_MSG.0.lock().unwrap();
+        for group in *groups {
+            tx.send(SrvMsg::AddGroup(group.clone()));
+        }
+    }
 
     // fetch contact list
     thread::spawn(|| fetch_contact());
@@ -450,6 +486,19 @@ fn sync_check() {
     }
 }
 
+pub unsafe extern "C" fn send_chat(gc: *mut PurpleConnection,
+                                   id: i32,
+                                   msg: *const c_char,
+                                   flags: PurpleMessageFlags)
+                                   -> c_int {
+
+    let msg = CStr::from_ptr(msg);
+
+    println!("send_chat: {:?}, {:?}", id, msg);
+
+    1
+}
+
 pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
                                  who: *const c_char,
                                  msg: *const c_char,
@@ -513,10 +562,8 @@ fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
 }
 
 fn get_uuid() -> String {
-    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb";
-    let mut response = CLIENT.get(url).send().unwrap();
-    let mut result = String::new();
-    response.read_to_string(&mut result).unwrap();
+    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
+    let result = get(&url);
 
     let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
@@ -528,7 +575,8 @@ fn get_uuid() -> String {
 }
 
 fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
-    let url = format!("https://login.weixin.qq.com/qrcode/{}", qr.as_ref());
+    let url = format!("https://login.web.wechat.com/qrcode/{}", qr.as_ref());
+    println!("get qr file: {}", url);
     let mut response = CLIENT.get(&url).send().unwrap();
     let mut result = Vec::new();
     response.read_to_end(&mut result).unwrap();
@@ -557,7 +605,11 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
         .unwrap();
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    println!("result: {}", result);
+    if result.len() > 500 {
+        println!("result: {}", &result[0..300]);
+    } else {
+        println!("result: {}", result);
+    }
 
     result
 }
@@ -595,6 +647,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
         match m {
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
+            SrvMsg::AddGroup(json) => add_group(&json),
             SrvMsg::MessageReceived(json) => append_message(&json),
             SrvMsg::YieldEvent => break,
         }
@@ -602,6 +655,82 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
     1
 }
+
+unsafe fn add_group(json: &Value) {
+    // println!("add group: {:?}, {:?}", json["UserName"], json["NickName"]);
+    let free_func = Some(std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void),
+                                               unsafe extern "C" fn(*mut libc::c_void)>(g_free));
+    let components = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash),
+                                                     Some(glib_sys::g_str_equal),
+                                                     free_func,
+                                                     free_func);
+    let account = {
+        ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount
+    };
+    let chat_key = CString::new("ChatId").unwrap();
+    let chat_name = json["UserName"].as_str().unwrap();
+    let chat = CString::new(chat_name).unwrap();
+    let alias_name = json["NickName"].as_str().unwrap();
+    let alias = CString::new(alias_name).unwrap();
+    let group_name = CString::new("Wechat Groups").unwrap();
+    let group = purple_find_group(group_name.as_ptr());
+    let chat_ptr = purple_chat_new(account as *mut PurpleAccount,
+                                   chat.as_ptr(),
+                                   components as *mut GHashTable);
+
+    g_hash_table_insert(components as *mut GHashTable,
+                        g_strdup(chat_key.as_ptr()) as *mut c_void,
+                        g_strdup(alias.as_ptr()) as *mut c_void);
+
+    println!("add chat: {:?} {} ({})", chat_ptr, alias_name, chat_name);
+
+    // let conversation = purple_conversation_new(PURPLE_CONV_TYPE_CHAT, account, chat.as_ptr());
+    // println!("conv: {:?}", conversation);
+
+    purple_blist_add_chat(chat_ptr, group, null_mut());
+    purple_blist_alias_chat(chat_ptr, alias.as_ptr());
+    purple_blist_node_set_flags(chat_ptr as *mut PurpleBlistNode,
+                                PURPLE_BLIST_NODE_FLAG_NO_SAVE);
+
+    // serv_got_joined_chat(purple_account_get_connection(account), 0, chat.as_ptr());
+
+
+    // let id = purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation));
+
+    // println!("id: {:?}", id);
+
+    // serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
+    //  id,
+    //  chat.as_ptr());
+}
+
+pub unsafe extern "C" fn find_blist_chat(account: *mut PurpleAccount,
+                                         name: *const c_char)
+                                         -> *mut PurpleChat {
+
+    let name = CStr::from_ptr(name);
+
+    println!("find_blist_chat: {:?}, {:?}", account, name);
+
+    null_mut()
+}
+
+// unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
+//     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+//     let name = CString::new(name).unwrap();
+//     let conv = purple_find_conversation_with_account(conv_type, name.as_ptr(), account);
+
+//     if conv == null_mut() {
+//         purple_conversation_new(conv_type, account, name.as_ptr())
+//     } else {
+//         conv
+//     }
+// }
+
+// unsafe fn conv_chat(name: &str) -> *mut PurpleConvChat {
+//     let conv = conversion(PURPLE_CONV_TYPE_CHAT, name);
+//     purple_conversation_get_chat_data(conv)
+// }
 
 unsafe fn append_message(json: &Value) {
     if let Value::Array(ref list) = json["AddMsgList"] {
@@ -623,22 +752,32 @@ unsafe fn append_message(json: &Value) {
 
             let content = CString::new(msg["Content"].as_str().unwrap()).unwrap();
             let from = msg["FromUserName"].as_str().unwrap();
-            let to = CString::new(msg["ToUserName"].as_str().unwrap()).unwrap();
+            let dest = msg["ToUserName"].as_str().unwrap();
+            let to = CString::new(dest).unwrap();
             let time = msg["CreateTime"].as_i64().unwrap();
 
-            if self_name != from {
+            println!("chat message: {:?}", msg);
+
+            if dest.starts_with("@@") {
+                // got chat room message
+                // let chat = conv_chat(dest);
                 let from = CString::new(from).unwrap();
-                serv_got_im(gc,
-                            from.as_ptr(),
-                            content.as_ptr(),
-                            PURPLE_MESSAGE_RECV,
-                            time);
+                // purple_conv_chat_write(chat, from.as_ptr(), content.as_ptr(), PURPLE_MESSAGE_RECV, time);
             } else {
-                serv_got_im(gc,
-                            to.as_ptr(),
-                            content.as_ptr(),
-                            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_WHISPER,
-                            time);
+                if self_name != from {
+                    let from = CString::new(from).unwrap();
+                    serv_got_im(gc,
+                                from.as_ptr(),
+                                content.as_ptr(),
+                                PURPLE_MESSAGE_RECV,
+                                time);
+                } else {
+                    serv_got_im(gc,
+                                to.as_ptr(),
+                                content.as_ptr(),
+                                PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_WHISPER,
+                                time);
+                }
             }
         }
     }
@@ -675,6 +814,8 @@ unsafe fn add_buddy(user: &User) {
 //         purple_prpl_got_user_status(account, user_name.as_ptr(), available.as_ptr());
 //     }
 // }
+
+unsafe fn add_chat() {}
 
 pub fn login() {
 
