@@ -190,21 +190,13 @@ impl WeChat {
 
     fn append_user(&mut self, user: &User) {
         if self.user_list.insert(user.clone()) {
-            SRV_MSG.0
-                .lock()
-                .unwrap()
-                .send(SrvMsg::AddContact(user.clone()))
-                .unwrap();
+            send_server_message(SrvMsg::AddContact(user.clone()));
         }
     }
 
     fn append_chat(&mut self, chat: &ChatRoom) {
         if self.chat_list.insert(chat.clone()) {
-            SRV_MSG.0
-                .lock()
-                .unwrap()
-                .send(SrvMsg::AddGroup(chat.clone()))
-                .unwrap();
+            send_server_message(SrvMsg::AddGroup(chat.clone()));
         }
     }
 
@@ -329,6 +321,14 @@ impl WeChat {
     }
 }
 
+fn send_server_message(m: SrvMsg) {
+    SRV_MSG.0
+        .lock()
+        .unwrap()
+        .send(m)
+        .unwrap();
+}
+
 pub fn start_login() {
 
     let uuid = get_uuid();
@@ -336,11 +336,7 @@ pub fn start_login() {
 
     // start check login thread
     thread::spawn(|| { check_scan(uuid); });
-    SRV_MSG.0
-        .lock()
-        .unwrap()
-        .send(SrvMsg::ShowVerifyImage(file_path))
-        .unwrap();
+    send_server_message(SrvMsg::ShowVerifyImage(file_path));
 }
 
 fn check_scan(uuid: String) {
@@ -466,11 +462,7 @@ fn fetch_contact() {
 
     // yield event loop
     {
-        SRV_MSG.0
-            .lock()
-            .unwrap()
-            .send(SrvMsg::YieldEvent)
-            .unwrap();
+        send_server_message(SrvMsg::YieldEvent);
     }
 
     let mut wechat = WECHAT.write().unwrap();
@@ -607,11 +599,7 @@ fn check_new_message() {
         WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
     }
 
-    SRV_MSG.0
-        .lock()
-        .unwrap()
-        .send(SrvMsg::MessageReceived(json))
-        .unwrap();
+    send_server_message(SrvMsg::MessageReceived(json));
 }
 
 fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
@@ -864,7 +852,7 @@ unsafe fn append_message(json: &Value) {
             if dest.starts_with("@@") {
                 // got chat room message
                 // let chat = conv_chat(dest);
-                let from = CString::new(from).unwrap();
+                // let from = CString::new(from).unwrap();
                 // purple_conv_chat_write(chat, from.as_ptr(), content.as_ptr(), PURPLE_MESSAGE_RECV, time);
             } else {
                 if self_name != from {
