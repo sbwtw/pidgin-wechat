@@ -299,7 +299,7 @@ impl WeChat {
         value
     }
 
-    fn message_send_data(&self, who: String, content: String) -> Value {
+    fn message_send_data(&self, who: &str, content: &str) -> Value {
 
         let mut id = time_stamp().to_string();
         id.push_str("1234");
@@ -544,21 +544,21 @@ pub unsafe extern "C" fn send_chat(gc: *mut PurpleConnection,
                                    flags: PurpleMessageFlags)
                                    -> c_int {
 
-    let msg = CStr::from_ptr(msg);
+    let msg = CStr::from_ptr(msg).to_string_lossy().into_owned();
 
-    println!("send_chat: {:?}, {:?}", id, msg);
+    let wechat = WECHAT.read().unwrap();
+    if let Some(chat) = wechat.find_chat_by_token(id as usize) {
+        send_message(&chat.id(), &msg);
+    } else {
+        println!("chat not found {}", msg);
+    }
 
     0
 }
 
-pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
-                                 who: *const c_char,
-                                 msg: *const c_char,
-                                 _: PurpleMessageFlags)
-                                 -> c_int {
+fn send_message(who: &str, msg: &str) {
 
-    let who = CStr::from_ptr(who).to_string_lossy().into_owned().to_owned();
-    let msg = CStr::from_ptr(msg).to_string_lossy().into_owned().to_owned();
+    println!("send_message: {}: {}", who, msg);
 
     let (url, data) = {
         let wechat = WECHAT.read().unwrap();
@@ -567,13 +567,21 @@ pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
 
         (url, data)
     };
+
     // TODO: check result.
     let _ = post(url, &data);
+}
 
-    // CLT_MSG.0
-    // .lock()
-    // .unwrap()
-    // .send(CltMsg::SendMsg(who, msg));
+pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
+                                 who: *const c_char,
+                                 msg: *const c_char,
+                                 _: PurpleMessageFlags)
+                                 -> c_int {
+
+    let who = CStr::from_ptr(who).to_string_lossy().into_owned();
+    let msg = CStr::from_ptr(msg).to_string_lossy().into_owned();
+
+    send_message(&who, &msg);
 
     1
 }
