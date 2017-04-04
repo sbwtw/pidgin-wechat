@@ -149,10 +149,7 @@ impl WeChat {
     fn sync_key(&self) -> Value {
         assert!(self.sync_keys.is_array());
 
-        let count = self.sync_keys
-            .as_array()
-            .unwrap()
-            .len();
+        let count = self.sync_keys.as_array().unwrap().len();
         let value = json!({"Count" : count, "List" : self.sync_keys});
 
         value
@@ -322,11 +319,7 @@ impl WeChat {
 }
 
 fn send_server_message(m: SrvMsg) {
-    SRV_MSG.0
-        .lock()
-        .unwrap()
-        .send(m)
-        .unwrap();
+    SRV_MSG.0.lock().unwrap().send(m).unwrap();
 }
 
 pub fn start_login() {
@@ -503,7 +496,8 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = CLIENT.get(&url)
+        let mut response = CLIENT
+            .get(&url)
             .headers(headers.clone())
             .send()
             .unwrap();
@@ -512,16 +506,8 @@ fn sync_check() {
 
         let reg = Regex::new(r#"retcode:"(\d+)",selector:"(\d+)""#).unwrap();
         let caps = reg.captures(&result).unwrap();
-        let retcode: isize = caps.get(1)
-            .unwrap()
-            .as_str()
-            .parse()
-            .unwrap();
-        let selector: isize = caps.get(2)
-            .unwrap()
-            .as_str()
-            .parse()
-            .unwrap();
+        let retcode: isize = caps.get(1).unwrap().as_str().parse().unwrap();
+        let selector: isize = caps.get(2).unwrap().as_str().parse().unwrap();
         println!("{} = {} - {}", result, retcode, selector);
 
         // check error
@@ -604,7 +590,10 @@ fn check_new_message() {
     // refersh sync check key
     let json: Value = result.parse().unwrap();
     {
-        WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
+        WECHAT
+            .write()
+            .unwrap()
+            .set_sync_key(&json["SyncCheckKey"]);
     }
 
     send_server_message(SrvMsg::MessageReceived(json));
@@ -624,10 +613,7 @@ fn get_uuid() -> String {
     let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
 
-    caps.get(1)
-        .unwrap()
-        .as_str()
-        .to_owned()
+    caps.get(1).unwrap().as_str().to_owned()
 }
 
 fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
@@ -655,7 +641,8 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
     };
 
     println!("get: {:?}", url);
-    let mut response = CLIENT.get(url.as_ref())
+    let mut response = CLIENT
+        .get(url.as_ref())
         .headers(headers)
         .send()
         .unwrap();
@@ -679,7 +666,8 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
              url,
              headers,
              data);
-    let mut response = CLIENT.post(url.as_ref())
+    let mut response = CLIENT
+        .post(url.as_ref())
         .headers(headers)
         .body(&data.to_string())
         .send()
@@ -741,13 +729,17 @@ unsafe fn add_group(chat: &ChatRoom) {
         WECHAT.write().unwrap().set_chat_ptr(chat, chat_ptr);
     }
 
-    let alias = chat.alias_cstring();
     let group_name = CString::new("Wechat Groups").unwrap();
     let group = purple_find_group(group_name.as_ptr());
     purple_blist_add_chat(chat_ptr, group, null_mut());
-    purple_blist_alias_chat(chat_ptr, alias.as_ptr());
     purple_blist_node_set_flags(chat_ptr as *mut PurpleBlistNode,
                                 PURPLE_BLIST_NODE_FLAG_NO_SAVE);
+
+    // set chat alias if not empty
+    if !chat.alias().is_empty() {
+        let alias = chat.alias_cstring();
+        purple_blist_alias_chat(chat_ptr, alias.as_ptr());
+    }
 }
 
 // unsafe fn add_group_(json: &Value) {
@@ -803,7 +795,10 @@ pub unsafe extern "C" fn find_blist_chat(_: *mut PurpleAccount,
                                          -> *mut PurpleChat {
     let name = CStr::from_ptr(name);
 
-    let chat_ptr = WECHAT.read().unwrap().find_chat_ptr(name.to_string_lossy().to_mut());
+    let chat_ptr = WECHAT
+        .read()
+        .unwrap()
+        .find_chat_ptr(name.to_string_lossy().to_mut());
 
     chat_ptr
 }
