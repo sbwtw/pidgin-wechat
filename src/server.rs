@@ -535,10 +535,10 @@ fn sync_check() {
     }
 }
 
-pub unsafe extern "C" fn send_chat(gc: *mut PurpleConnection,
+pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
                                    id: i32,
                                    msg: *const c_char,
-                                   flags: PurpleMessageFlags)
+                                   _: PurpleMessageFlags)
                                    -> c_int {
 
     let msg = CStr::from_ptr(msg).to_string_lossy().into_owned();
@@ -820,22 +820,17 @@ pub fn find_chat_token(id: &str) -> usize {
     token
 }
 
-// unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
-//     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
-//     let name = CString::new(name).unwrap();
-//     let conv = purple_find_conversation_with_account(conv_type, name.as_ptr(), account);
+unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
+    let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+    let name = CString::new(name).unwrap();
+    let conv = purple_find_conversation_with_account(conv_type, name.as_ptr(), account);
 
-//     if conv == null_mut() {
-//         purple_conversation_new(conv_type, account, name.as_ptr())
-//     } else {
-//         conv
-//     }
-// }
-
-// unsafe fn conv_chat(name: &str) -> *mut PurpleConvChat {
-//     let conv = conversion(PURPLE_CONV_TYPE_CHAT, name);
-//     purple_conversation_get_chat_data(conv)
-// }
+    if conv == null_mut() {
+        purple_conversation_new(conv_type, account, name.as_ptr())
+    } else {
+        conv
+    }
+}
 
 unsafe fn append_message(json: &Value) {
     if let Value::Array(ref list) = json["AddMsgList"] {
@@ -856,9 +851,9 @@ unsafe fn append_message(json: &Value) {
             }
 
             let content = CString::new(msg["Content"].as_str().unwrap()).unwrap();
-            let from = msg["FromUserName"].as_str().unwrap();
+            let src = msg["FromUserName"].as_str().unwrap();
+            let from = CString::new(src).unwrap();
             let dest = msg["ToUserName"].as_str().unwrap();
-            let to = CString::new(dest).unwrap();
             let time = msg["CreateTime"].as_i64().unwrap();
 
             println!("chat message: {:?}", msg);
@@ -869,19 +864,19 @@ unsafe fn append_message(json: &Value) {
                 // let from = CString::new(from).unwrap();
                 // purple_conv_chat_write(chat, from.as_ptr(), content.as_ptr(), PURPLE_MESSAGE_RECV, time);
             } else {
-                if self_name != from {
-                    let from = CString::new(from).unwrap();
+                if self_name != src {
                     serv_got_im(gc,
                                 from.as_ptr(),
                                 content.as_ptr(),
                                 PURPLE_MESSAGE_RECV,
                                 time);
                 } else {
-                    serv_got_im(gc,
-                                to.as_ptr(),
-                                content.as_ptr(),
-                                PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_WHISPER,
-                                time);
+                    let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
+                    purple_conversation_write(conv,
+                                              from.as_ptr(),
+                                              content.as_ptr(),
+                                              PURPLE_MESSAGE_SEND,
+                                              time);
                 }
             }
         }
