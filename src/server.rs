@@ -565,6 +565,7 @@ fn send_message(who: &str, msg: &str) {
         (url, data)
     };
 
+    // TODO: keep asynchronous
     // TODO: check result.
     let _ = post(url, &data);
 }
@@ -822,14 +823,43 @@ pub fn find_chat_token(id: &str) -> usize {
 
 unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
-    let name = CString::new(name).unwrap();
-    let conv = purple_find_conversation_with_account(conv_type, name.as_ptr(), account);
+    let conv =
+        purple_find_conversation_with_account(conv_type, name.as_ptr() as *const i8, account);
 
-    if conv == null_mut() {
-        purple_conversation_new(conv_type, account, name.as_ptr())
-    } else {
-        conv
+    if conv != null_mut() {
+        return conv;
     }
+
+    // conv is null
+    if conv_type == PURPLE_CONV_TYPE_IM {
+        return purple_conversation_new(conv_type, account, name.as_ptr() as *const i8);
+    }
+
+    assert!(name.starts_with("@@"));
+    let token = find_chat_token(name);
+
+    // search chat
+    let gc = (*account).gc;
+    let conv = purple_find_chat(gc, token as i32);
+    println!("purple_find_chat for token {}, result = {:?}", token, conv);
+    if conv != null_mut() {
+        return conv;
+    }
+
+    // join chat
+    let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+    println!("join chat {:?}, token = {}", name, token);
+    serv_got_joined_chat(purple_account_get_connection(account),
+                         token as i32,
+                         name.as_ptr() as *const i8);
+
+    // find again
+    let conv =
+        purple_find_conversation_with_account(conv_type, name.as_ptr() as *const i8, account);
+    // ensure not nullptr
+    assert!(conv != null_mut());
+
+    conv
 }
 
 unsafe fn append_message(json: &Value) {
@@ -858,11 +888,22 @@ unsafe fn append_message(json: &Value) {
 
             println!("chat message: {:?}", msg);
 
-            if dest.starts_with("@@") {
-                // got chat room message
-                // let chat = conv_chat(dest);
-                // let from = CString::new(from).unwrap();
-                // purple_conv_chat_write(chat, from.as_ptr(), content.as_ptr(), PURPLE_MESSAGE_RECV, time);
+            if src.starts_with("@@") {
+                let conv = conversion(PURPLE_CONV_TYPE_CHAT, src);
+                let chat = purple_conversation_get_chat_data(conv);
+                purple_conv_chat_write(chat,
+                                       from.as_ptr(),
+                                       content.as_ptr(),
+                                       PURPLE_MESSAGE_RECV,
+                                       time);
+            } else if dest.starts_with("@@") {
+                let conv = conversion(PURPLE_CONV_TYPE_CHAT, dest);
+                let chat = purple_conversation_get_chat_data(conv);
+                purple_conv_chat_write(chat,
+                                       from.as_ptr(),
+                                       content.as_ptr(),
+                                       PURPLE_MESSAGE_SEND,
+                                       time);
             } else {
                 if self_name != src {
                     serv_got_im(gc,
