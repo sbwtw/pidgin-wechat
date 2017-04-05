@@ -112,14 +112,6 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
     (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
 
-    // let name = CString::new("name").unwrap();
-    // let buddy = purple_buddy_new(account, name.as_ptr(), null_mut());
-    // (*buddy).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
-    // purple_blist_add_buddy(buddy, null_mut(), group, null_mut());
-
-    // let available = CString::new("available").unwrap();
-    // purple_prpl_got_user_status(account, name.as_ptr(), available.as_ptr());
-
     std::thread::spawn(|| { server::login(); });
 }
 
@@ -142,17 +134,9 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
 
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
 
-    // set to joined
-    // let conversation =
-    // purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, id.as_ptr(), account);
-    // println!("conv: {:?}", conversation);
-
     serv_got_joined_chat(purple_account_get_connection(account),
                          token as i32,
                          id.as_ptr());
-    // serv_got_joined_chat(purple_account_get_connection(account as *mut PurpleAccount),
-    //                      purple_conv_chat_get_id(purple_conversation_get_chat_data(conversation)),
-    //                      id.as_ptr());
 }
 
 extern "C" fn chat_info_defaults(_: *mut PurpleConnection, _: *const c_char) -> *mut GHashTable {
