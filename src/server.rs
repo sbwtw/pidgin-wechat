@@ -479,6 +479,8 @@ fn sync_check() {
 
     println!("{:?}", headers);
 
+    let mut retries = 0;
+
     // let uid
     loop {
         let url = {
@@ -512,7 +514,16 @@ fn sync_check() {
 
         // check error
         if retcode != 0 {
-            break;
+            retries += 1;
+
+            // retry
+            if retries > 10 {
+                break;
+            } else {
+                continue;
+            }
+        } else {
+            retries = 0;
         }
 
         // no new message.
