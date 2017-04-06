@@ -31,6 +31,7 @@ use std::collections::BTreeSet;
 
 lazy_static!{
     pub static ref ACCOUNT: RwLock<Pointer> = RwLock::new(Pointer::new());
+    static ref VERIFY_HANDLE: Mutex<Pointer> = Mutex::new(Pointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
     static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
@@ -349,6 +350,10 @@ fn check_scan(uuid: String) {
     let reg = Regex::new(r#"redirect_uri="([^"]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
     let uri = caps.get(1).unwrap().as_str();
+
+    // scan successful, close dialog
+    let vh = VERIFY_HANDLE.lock().unwrap();
+    unsafe { purple_request_close(PURPLE_REQUEST_FIELDS, vh.as_ptr()) };
 
     // webwxnewloginpage
     let url = format!("{}&fun=new&version=v2", uri);
@@ -934,19 +939,24 @@ pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
     let ok = CString::new("Ok").unwrap();
     let cancel = CString::new("Cancel").unwrap();
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
-    purple_request_fields(purple_account_get_connection(account) as *mut c_void, // handle
-                          title.as_ptr(), // title
-                          title.as_ptr(), // primary
-                          null_mut(), // secondary
-                          fields, // fields
-                          ok.as_ptr(), // ok_text
-                          Some(ok_cb), // ok_cb
-                          cancel.as_ptr(), // cancel_text
-                          None, // cancel_cb
-                          account, // account
-                          null_mut(), // who
-                          null_mut(), // conv
-                          null_mut()); // user_data
+    let verify_handle = purple_request_fields(purple_account_get_connection(account) as
+                                              *mut c_void, // handle
+                                              title.as_ptr(), // title
+                                              title.as_ptr(), // primary
+                                              null_mut(), // secondary
+                                              fields, // fields
+                                              ok.as_ptr(), // ok_text
+                                              Some(ok_cb), // ok_cb
+                                              cancel.as_ptr(), // cancel_text
+                                              None, // cancel_cb
+                                              account, // account
+                                              null_mut(), // who
+                                              null_mut(), // conv
+                                              null_mut()); // user_data
+
+    assert!(verify_handle != null_mut());
+    let mut vh = VERIFY_HANDLE.lock().unwrap();
+    vh.set(verify_handle);
 }
 
 extern "C" fn ok_cb() {}
