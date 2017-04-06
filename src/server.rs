@@ -867,11 +867,12 @@ unsafe fn append_message(json: &Value) {
                                 time);
                 } else {
                     let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
-                    purple_conversation_write(conv,
-                                              from.as_ptr(),
-                                              content.as_ptr(),
-                                              PURPLE_MESSAGE_SEND,
-                                              time);
+                    let im = purple_conversation_get_im_data(conv);
+                    purple_conv_im_write(im,
+                                         from.as_ptr(),
+                                         content.as_ptr(),
+                                         PURPLE_MESSAGE_SEND,
+                                         time);
                 }
             }
         }
