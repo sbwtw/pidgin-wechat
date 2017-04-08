@@ -1,8 +1,8 @@
 # Pidgin-wechat
-### pidgin-wechat 是一个用微信网页版接口实现 pidgin 聊天协议的插件。
+> pidgin-wechat 是一个用微信网页版接口实现 pidgin 聊天协议的插件。
 
 ## 构建
-### 使用 cargo 可以很方便的构建本项目。
+> 使用 cargo 可以很方便的构建本项目。
 ```
 cargo build --release
 ```
@@ -13,7 +13,7 @@ cp target/release/libwechat.so ~/.purple/plugins/
 ```
 
 ## 项目进展
-### 目前还在技术验证阶段，暂时实现了基本的登录和文本消息的收发，下一步准备支持图片消息相关的功能。
+> 目前还在技术验证阶段，暂时实现了基本的登录和文本消息的收发，下一步准备支持图片消息相关的功能。
 
 ## 开发进度
 - [x] 登录
@@ -26,8 +26,10 @@ cp target/release/libwechat.so ~/.purple/plugins/
 - [ ] 表情
 
 ## Hack
-### 可以使用 `cargo build` 来生成 debug 版本的库文件，在 `target/debug/` 目录下。
-### pidgin-wechat 的日志目前是输出到标准输出上的，可以在终端中启动 pidgin，就可以看到日志。
-### 如果遇到崩溃问题，可以使用 `coredumpctl -1 info pidgin` 来输出 pidgin 的 core dump 信息，这将对定位问题十分有用。
+> 可以使用 `cargo build` 来生成 debug 版本的库文件，在 `target/debug/` 目录下。
+
+> pidgin-wechat 的日志目前是输出到标准输出上的，可以在终端中启动 pidgin，就可以看到日志。
+
+> 如果遇到崩溃问题，可以使用 `coredumpctl -1 info pidgin` 来输出 pidgin 的 core dump 信息，这将对定位问题十分有用。
 
 ## 协议
