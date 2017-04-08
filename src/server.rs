@@ -781,9 +781,9 @@ pub fn find_chat_token(id: &str) -> usize {
 }
 
 unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut PurpleConversation {
+    let name_cstr = CString::new(name).unwrap();
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
-    let conv =
-        purple_find_conversation_with_account(conv_type, name.as_ptr() as *const i8, account);
+    let conv = purple_find_conversation_with_account(conv_type, name_cstr.as_ptr(), account);
 
     if conv != null_mut() {
         return conv;
@@ -791,7 +791,7 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
 
     // conv is null
     if conv_type == PURPLE_CONV_TYPE_IM {
-        return purple_conversation_new(conv_type, account, name.as_ptr() as *const i8);
+        return purple_conversation_new(conv_type, account, name_cstr.as_ptr());
     }
 
     assert!(name.starts_with("@@"));
@@ -810,11 +810,10 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
     println!("join chat {:?}, token = {}", name, token);
     serv_got_joined_chat(purple_account_get_connection(account),
                          token as i32,
-                         name.as_ptr() as *const i8);
+                         name_cstr.as_ptr());
 
     // find again
-    let conv =
-        purple_find_conversation_with_account(conv_type, name.as_ptr() as *const i8, account);
+    let conv = purple_find_conversation_with_account(conv_type, name_cstr.as_ptr(), account);
     // ensure not nullptr
     assert!(conv != null_mut());
 
