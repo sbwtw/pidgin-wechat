@@ -572,9 +572,8 @@ fn send_message(who: &str, msg: &str) {
         (url, data)
     };
 
-    // TODO: keep asynchronous
     // TODO: check result.
-    let _ = post(url, &data);
+    thread::spawn(move || { let _ = post(&url, &data); });
 }
 
 pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
