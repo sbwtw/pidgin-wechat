@@ -546,15 +546,25 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
                                    _: PurpleMessageFlags)
                                    -> c_int {
 
-    let msg = CStr::from_ptr(msg).to_string_lossy().into_owned();
+    let msg_cstr = CStr::from_ptr(msg).to_string_lossy().into_owned();
 
     let wechat = WECHAT.read().unwrap();
     if let Some(chat) = wechat.find_chat_by_token(id as usize) {
-        send_message(&chat.id(), &msg);
 
-        // TODO: append message to conversation
+        let chat_id = chat.id();
+        let conv = conversion(PURPLE_CONV_TYPE_CHAT, &chat_id);
+        let chat = purple_conversation_get_chat_data(conv);
+        let self_name = CString::new(wechat.user_name()).unwrap();
+
+        purple_conv_chat_write(chat,
+                               self_name.as_ptr(),
+                               msg,
+                               PURPLE_MESSAGE_SEND,
+                               time_stamp());
+
+        send_message(&chat_id, &msg_cstr);
     } else {
-        println!("chat not found {}", msg);
+        println!("chat not found {}", msg_cstr);
     }
 
     0
