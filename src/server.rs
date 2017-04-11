@@ -560,7 +560,7 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
                                self_name.as_ptr(),
                                msg,
                                PURPLE_MESSAGE_SEND,
-                               time_stamp());
+                               time_stamp() / 1000);
 
         send_message(&chat_id, &msg_cstr);
     } else {
