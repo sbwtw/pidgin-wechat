@@ -326,7 +326,9 @@ fn send_server_message(m: SrvMsg) {
 pub fn start_login() {
 
     let uuid = get_uuid();
-    let file_path = save_qr_file(&uuid);
+    let url = format!("https://login.web.wechat.com/qrcode/{}", uuid);
+    let file_path = save_image(&url);
+    // let file_path = save_qr_file(&uuid);
 
     // start check login thread
     thread::spawn(|| { check_scan(uuid); });
@@ -644,23 +646,23 @@ fn get_uuid() -> String {
     caps.get(1).unwrap().as_str().to_owned()
 }
 
-fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
-    let url = format!("https://login.web.wechat.com/qrcode/{}", qr.as_ref());
-    println!("get qr file: {}", url);
-    let mut response = CLIENT.get(&url).send().unwrap();
-    let mut result = Vec::new();
-    response.read_to_end(&mut result).unwrap();
+// fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
+//     let url = format!("https://login.web.wechat.com/qrcode/{}", qr.as_ref());
+//     println!("get qr file: {}", url);
+//     let mut response = CLIENT.get(&url).send().unwrap();
+//     let mut result = Vec::new();
+//     response.read_to_end(&mut result).unwrap();
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open("/tmp/qr.png")
-        .unwrap();
-    file.write(&result).unwrap();
+//     let mut file = OpenOptions::new()
+//         .write(true)
+//         .create(true)
+//         .truncate(true)
+//         .open("/tmp/qr.png")
+//         .unwrap();
+//     file.write(&result).unwrap();
 
-    "/tmp/qr.png".to_owned()
-}
+//     "/tmp/qr.png".to_owned()
+// }
 
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
@@ -829,7 +831,7 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
     conv
 }
 
-fn save_image(url: &str) {
+fn save_image(url: &str) -> String {
 
     let headers = {
         WECHAT.read().unwrap().headers()
@@ -848,6 +850,8 @@ fn save_image(url: &str) {
         .open("/tmp/img.png")
         .unwrap();
     file.write_all(&result).unwrap();
+
+    "/tmp/img.png".to_owned()
 }
 
 unsafe fn append_image_message(msg: &Value) {
