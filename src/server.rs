@@ -829,6 +829,36 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
     conv
 }
 
+fn save_image(url: &str) {
+
+    let headers = {
+        WECHAT.read().unwrap().headers()
+    };
+
+    let mut response = CLIENT.get(url).headers(headers).send().unwrap();
+    let mut result = Vec::new();
+    response.read_to_end(&mut result).unwrap();
+
+    println!("fetched image: {} {} {}", url, response.status, result.len());
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open("/tmp/img.png")
+        .unwrap();
+    file.write_all(&result).unwrap();
+}
+
+unsafe fn append_image_message(msg: &Value) {
+    println!("append image message: \n{:?}", msg);
+
+    let msg_id = msg["MsgId"].as_str().unwrap();
+    let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetmsgimg?&MsgID={}&skey={}", msg_id, WECHAT.read().unwrap().skey());
+
+    thread::spawn(move || { save_image(&url); });
+}
+
 unsafe fn append_text_message(msg: &Value) {
 
     let content = msg["Content"].as_str().unwrap();
@@ -895,6 +925,7 @@ fn append_message(json: &Value) {
             match msg_type {
                 // 51 is wechat init message
                 51 => continue,
+                3 => unsafe { append_image_message(msg) },
                 _ => unsafe { append_text_message(msg) },
             }
         }
