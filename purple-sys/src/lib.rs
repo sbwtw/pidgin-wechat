@@ -69,7 +69,8 @@ impl PurpleBuddyIconSpec {
 impl PurplePluginProtocolInfo {
     pub fn new() -> PurplePluginProtocolInfo {
         PurplePluginProtocolInfo {
-            options: OPT_PROTO_NO_PASSWORD | OPT_PROTO_IM_IMAGE,
+            options: OPT_PROTO_NO_PASSWORD | OPT_PROTO_IM_IMAGE | OPT_PROTO_UNIQUE_CHATNAME |
+                     OPT_PROTO_CHAT_TOPIC,
 
             user_splits: null_mut(),
             protocol_options: null_mut(),

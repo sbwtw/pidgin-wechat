@@ -49,6 +49,7 @@ enum SrvMsg {
     AddContact(User),
     AddGroup(ChatRoom),
     MessageReceived(Value),
+    AppendImageMessage(i32, Value),
     YieldEvent,
 }
 
@@ -723,6 +724,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
             SrvMsg::AddContact(user) => add_buddy(&user),
             SrvMsg::AddGroup(chat) => add_group(&chat),
             SrvMsg::MessageReceived(json) => append_message(&json),
+            SrvMsg::AppendImageMessage(id, json) => append_image_message(id, &json),
             SrvMsg::YieldEvent => break,
         }
     }
@@ -847,20 +849,52 @@ fn save_image(url: &str) -> String {
         .write(true)
         .create(true)
         .truncate(true)
-        .open("/tmp/img.png")
+        .open("/tmp/img.jpg")
         .unwrap();
     file.write_all(&result).unwrap();
 
-    "/tmp/img.png".to_owned()
+    "/tmp/img.jpg".to_owned()
 }
 
-unsafe fn append_image_message(msg: &Value) {
-    println!("append image message: \n{:?}", msg);
+unsafe fn append_image_message(id: i32, msg: &Value) {
+
+    let img_msg = CString::new(format!(r#"<IMG ID="{}">"#, id)).unwrap();
+
+    let src = msg["FromUserName"].as_str().unwrap();
+    let from = CString::new(src).unwrap();
+    let dest = msg["ToUserName"].as_str().unwrap();
+    let time = msg["CreateTime"].as_i64().unwrap();
+
+    let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
+    let im = purple_conversation_get_im_data(conv);
+    purple_conv_im_write(im,
+                         from.as_ptr(),
+                         img_msg.as_ptr(),
+                         PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_IMAGES,
+                         time);
+}
+
+unsafe fn process_image_message(msg: &Value) {
+    println!("process image message: \n{:?}", msg);
 
     let msg_id = msg["MsgId"].as_str().unwrap();
     let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetmsgimg?&MsgID={}&skey={}", msg_id, WECHAT.read().unwrap().skey());
 
-    thread::spawn(move || { save_image(&url); });
+    let msg = msg.clone();
+
+    thread::spawn(move || {
+        let img_path = CString::new(save_image(&url)).unwrap();
+        let img = purple_imgstore_new_from_file(img_path.as_ptr());
+        let img_data = purple_imgstore_get_data(img);
+        let img_size = purple_imgstore_get_size(img);
+        let img_filename = purple_imgstore_get_filename(img);
+
+        let id = purple_imgstore_add_with_id(img_data as *mut c_void, img_size, img_filename);
+
+        let sender = SRV_MSG.0.lock().unwrap();
+        sender.send(SrvMsg::YieldEvent).unwrap();
+        sender.send(SrvMsg::AppendImageMessage(id, msg)).unwrap()
+    });
 }
 
 unsafe fn append_text_message(msg: &Value) {
@@ -929,7 +963,7 @@ fn append_message(json: &Value) {
             match msg_type {
                 // 51 is wechat init message
                 51 => continue,
-                3 => unsafe { append_image_message(msg) },
+                3 => unsafe { process_image_message(msg) },
                 _ => unsafe { append_text_message(msg) },
             }
         }
