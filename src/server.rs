@@ -845,37 +845,32 @@ fn save_image(url: &str) -> String {
 
     println!("fetched image: {} {} {}", url, response.status, result.len());
 
+    save_file(&result)
+}
+
+fn save_file(buf: &[u8]) -> String {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .open("/tmp/img.jpg")
         .unwrap();
-    file.write_all(&result).unwrap();
+    file.write_all(buf).unwrap();
 
     "/tmp/img.jpg".to_owned()
 }
 
 unsafe fn append_image_message(id: i32, msg: &Value) {
 
-    let img_msg = CString::new(format!(r#"<IMG ID="{}">"#, id)).unwrap();
-
     let src = msg["FromUserName"].as_str().unwrap();
-    let from = CString::new(src).unwrap();
     let dest = msg["ToUserName"].as_str().unwrap();
     let time = msg["CreateTime"].as_i64().unwrap();
+    let img_msg = format!(r#"<IMG ID="{}">"#, id);
 
-    let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
-    let im = purple_conversation_get_im_data(conv);
-    purple_conv_im_write(im,
-                         from.as_ptr(),
-                         img_msg.as_ptr(),
-                         PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_IMAGES,
-                         time);
+    append_purple_message(src, dest, &img_msg, time);
 }
 
 unsafe fn process_image_message(msg: &Value) {
-    println!("process image message: \n{:?}", msg);
 
     let msg_id = msg["MsgId"].as_str().unwrap();
     let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetmsgimg?&MsgID={}&skey={}", msg_id, WECHAT.read().unwrap().skey());
@@ -884,6 +879,38 @@ unsafe fn process_image_message(msg: &Value) {
 
     thread::spawn(move || {
         let img_path = CString::new(save_image(&url)).unwrap();
+        let img = purple_imgstore_new_from_file(img_path.as_ptr());
+        let img_data = purple_imgstore_get_data(img);
+        let img_size = purple_imgstore_get_size(img);
+        let img_filename = purple_imgstore_get_filename(img);
+
+        let id = purple_imgstore_add_with_id(img_data as *mut c_void, img_size, img_filename);
+
+        let sender = SRV_MSG.0.lock().unwrap();
+        sender.send(SrvMsg::YieldEvent).unwrap();
+        sender.send(SrvMsg::AppendImageMessage(id, msg)).unwrap()
+    });
+}
+
+unsafe fn process_emoji_image(msg: &Value) {
+
+    let content = msg["Content"].as_str().unwrap();
+    let regex = Regex::new(r#"cdnurl\s*=\s*"([^"]+)""#).unwrap();
+    let caps = regex.captures(content).unwrap();
+    let url = caps.get(1).unwrap().as_str().to_owned();
+
+    let msg = msg.clone();
+
+    thread::spawn(move || {
+
+        let mut headers = Headers::new();
+        headers.set_raw("Host", vec![b"emoji.qpic.cn".to_vec()]);
+
+        let mut response = CLIENT.get(&url).headers(headers).send().unwrap();
+        let mut result = Vec::new();
+        response.read_to_end(&mut result).unwrap();
+
+        let img_path = CString::new(save_file(&result)).unwrap();
         let img = purple_imgstore_new_from_file(img_path.as_ptr());
         let img_data = purple_imgstore_get_data(img);
         let img_size = purple_imgstore_get_size(img);
@@ -956,6 +983,70 @@ unsafe fn append_text_message(msg: &Value) {
     }
 }
 
+unsafe fn append_purple_message(from: &str, dest: &str, content: &str, time: i64) {
+
+    let content_cstring = CString::new(content).unwrap();
+    let from_cstring = CString::new(from).unwrap();
+    let has_img = content.contains("<IMG ID=");
+    let send_flag = {
+        if has_img {
+            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_IMAGES
+        } else {
+            PURPLE_MESSAGE_SEND
+        }
+    };
+    let recv_flag = {
+        if has_img {
+            PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_IMAGES
+        } else {
+            PURPLE_MESSAGE_RECV
+        }
+    };
+
+    if from.starts_with("@@") {
+        let conv = conversion(PURPLE_CONV_TYPE_CHAT, from);
+        let chat = purple_conversation_get_chat_data(conv);
+
+        purple_conv_chat_write(chat,
+                               from_cstring.as_ptr(),
+                               content_cstring.as_ptr(),
+                               recv_flag,
+                               time);
+    } else if dest.starts_with("@@") {
+        let conv = conversion(PURPLE_CONV_TYPE_CHAT, dest);
+        let chat = purple_conversation_get_chat_data(conv);
+        purple_conv_chat_write(chat,
+                               from_cstring.as_ptr(),
+                               content_cstring.as_ptr(),
+                               send_flag,
+                               time);
+    } else {
+        let self_name = {
+            let wechat = WECHAT.read().unwrap();
+            wechat.user_name().to_owned()
+        };
+
+        if self_name != from {
+            let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+            let gc = (*account_ptr).gc;
+
+            serv_got_im(gc,
+                        from_cstring.as_ptr(),
+                        content_cstring.as_ptr(),
+                        recv_flag,
+                        time);
+        } else {
+            let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
+            let im = purple_conversation_get_im_data(conv);
+            purple_conv_im_write(im,
+                                 from_cstring.as_ptr(),
+                                 content_cstring.as_ptr(),
+                                 send_flag,
+                                 time);
+        }
+    }
+}
+
 fn append_message(json: &Value) {
     if let Value::Array(ref list) = json["AddMsgList"] {
         for msg in list {
@@ -964,6 +1055,7 @@ fn append_message(json: &Value) {
                 // 51 is wechat init message
                 51 => continue,
                 3 => unsafe { process_image_message(msg) },
+                47 => unsafe { process_emoji_image(msg) },
                 _ => unsafe { append_text_message(msg) },
             }
         }
