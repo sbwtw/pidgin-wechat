@@ -860,14 +860,27 @@ fn save_file(buf: &[u8]) -> String {
     "/tmp/img.jpg".to_owned()
 }
 
-unsafe fn append_image_message(id: i32, msg: &Value) {
+fn append_image_message(id: i32, msg: &Value) {
 
     let src = msg["FromUserName"].as_str().unwrap();
     let dest = msg["ToUserName"].as_str().unwrap();
     let time = msg["CreateTime"].as_i64().unwrap();
     let img_msg = format!(r#"<IMG ID="{}">"#, id);
 
-    append_purple_message(src, dest, &img_msg, time);
+    if src.starts_with("@@") {
+        let content = msg["Content"].as_str().unwrap();
+
+        // split content to find real sender
+        let regex = Regex::new(r#"^(@\w+):.*$"#).unwrap();
+        let caps = regex.captures(content).unwrap();
+        let sender = caps.get(1).unwrap().as_str();
+
+        append_purple_chat_message(src, dest, sender, &img_msg, time);
+    } else if dest.starts_with("@@") {
+        append_purple_chat_message(src, dest, dest, &img_msg, time);
+    } else {
+        append_purple_im_message(src, dest, &img_msg, time);
+    }
 }
 
 unsafe fn process_image_message(msg: &Value) {
@@ -983,7 +996,7 @@ unsafe fn append_text_message(msg: &Value) {
     }
 }
 
-unsafe fn append_purple_message(from: &str, dest: &str, content: &str, time: i64) {
+fn append_purple_chat_message(from: &str, dest: &str, sender: &str, content: &str, time: i64) {
 
     let content_cstring = CString::new(content).unwrap();
     let from_cstring = CString::new(from).unwrap();
@@ -1004,38 +1017,68 @@ unsafe fn append_purple_message(from: &str, dest: &str, content: &str, time: i64
     };
 
     if from.starts_with("@@") {
-        let conv = conversion(PURPLE_CONV_TYPE_CHAT, from);
-        let chat = purple_conversation_get_chat_data(conv);
+        let sender_cstring = CString::new(sender).unwrap();
+        unsafe {
+            let conv = conversion(PURPLE_CONV_TYPE_CHAT, from);
+            let chat = purple_conversation_get_chat_data(conv);
 
-        purple_conv_chat_write(chat,
-                               from_cstring.as_ptr(),
-                               content_cstring.as_ptr(),
-                               recv_flag,
-                               time);
+            purple_conv_chat_write(chat,
+                                   sender_cstring.as_ptr(),
+                                   content_cstring.as_ptr(),
+                                   recv_flag,
+                                   time);
+        }
     } else if dest.starts_with("@@") {
-        let conv = conversion(PURPLE_CONV_TYPE_CHAT, dest);
-        let chat = purple_conversation_get_chat_data(conv);
-        purple_conv_chat_write(chat,
-                               from_cstring.as_ptr(),
-                               content_cstring.as_ptr(),
-                               send_flag,
-                               time);
-    } else {
-        let self_name = {
-            let wechat = WECHAT.read().unwrap();
-            wechat.user_name().to_owned()
-        };
+        unsafe {
+            let conv = conversion(PURPLE_CONV_TYPE_CHAT, dest);
+            let chat = purple_conversation_get_chat_data(conv);
+            purple_conv_chat_write(chat,
+                                   from_cstring.as_ptr(),
+                                   content_cstring.as_ptr(),
+                                   send_flag,
+                                   time);
+        }
+    }
+}
 
-        if self_name != from {
-            let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+fn append_purple_im_message(from: &str, dest: &str, content: &str, time: i64) {
+
+    let content_cstring = CString::new(content).unwrap();
+    let from_cstring = CString::new(from).unwrap();
+    let has_img = content.contains("<IMG ID=");
+    let send_flag = {
+        if has_img {
+            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_IMAGES
+        } else {
+            PURPLE_MESSAGE_SEND
+        }
+    };
+    let recv_flag = {
+        if has_img {
+            PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_IMAGES
+        } else {
+            PURPLE_MESSAGE_RECV
+        }
+    };
+
+    let self_name = {
+        let wechat = WECHAT.read().unwrap();
+        wechat.user_name().to_owned()
+    };
+
+    if self_name != from {
+        let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
+
+        unsafe {
             let gc = (*account_ptr).gc;
-
             serv_got_im(gc,
                         from_cstring.as_ptr(),
                         content_cstring.as_ptr(),
                         recv_flag,
                         time);
-        } else {
+        }
+    } else {
+        unsafe {
             let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
             let im = purple_conversation_get_im_data(conv);
             purple_conv_im_write(im,
@@ -1048,8 +1091,11 @@ unsafe fn append_purple_message(from: &str, dest: &str, content: &str, time: i64
 }
 
 fn append_message(json: &Value) {
+
     if let Value::Array(ref list) = json["AddMsgList"] {
         for msg in list {
+            println!("got message =========================\n {}", json);
+
             let msg_type = msg["MsgType"].as_i64().unwrap();
             match msg_type {
                 // 51 is wechat init message
