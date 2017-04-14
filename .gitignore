@@ -2,3 +2,4 @@ target
 
 # vscode config file
 .task.json
+.vscode/
