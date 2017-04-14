@@ -909,9 +909,13 @@ unsafe fn process_emoji_image(msg: &Value) {
 
     let content = msg["Content"].as_str().unwrap();
     let regex = Regex::new(r#"cdnurl\s*=\s*"([^"]+)""#).unwrap();
-    let caps = regex.captures(content).unwrap();
-    let url = caps.get(1).unwrap().as_str().to_owned();
 
+    let caps = match regex.captures(content) {
+        Some(caps) => caps,
+        None => return append_text_message(msg),
+    };
+
+    let url = caps.get(1).unwrap().as_str().to_owned();
     let msg = msg.clone();
 
     thread::spawn(move || {
