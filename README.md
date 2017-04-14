@@ -42,4 +42,34 @@ pidgin-wechat 的日志目前是输出到标准输出上的，可以在终端中
 
 如果遇到崩溃问题，可以使用 `coredumpctl -1 info pidgin` 来输出 pidgin 的 core dump 信息（确保安装了 systemd 的 coredump 相关包），这将对定位问题十分有用。如果没有 coredump，请使用 `gdb` 获取相关信息。
 
+### 目录结构
+```
+.
+├── Cargo.lock
+├── Cargo.toml
+├── purple-sys                                      libpurple 接口的 codegen 目录，生成 rust-ffi 接口
+│   ├── build.rs
+│   ├── Cargo.lock
+│   ├── Cargo.toml
+│   ├── README.md
+│   ├── src
+│   │   ├── lib.rs
+│   │   └── purple.rs
+│   └── TODO.md
+├── README.md
+├── screenshot
+│   ├── 2017-04-13-211208_887x708_scrot.png
+│   └── 2017-04-13-211409_302x579_scrot.png
+└── src
+    ├── chatroom.rs                                 群组信息的 struct
+    ├── pointer.rs                                  一个 C raw pointer 的 wrapper
+    ├── server.rs                                   核心文件，wechat 服务通讯相关的代码
+    ├── user.rs                                     用户信息的 struct
+    └── wechat.rs                                   核心文件，实现 purple 接口的代码
+```
+
+## Q&A
+### 为什么使用 Pidgin/libpurple
+当前的桌面版 Wechat 实现已经很多了，并且界面更加现代化。但由于 pidgin/libpurple 对许多聊天协议都有支持，维护这个插件的主要目的在于能够在统一的平台上完成所有 IMs 的登录，不需要再登录 N 多个聊天工具。
+
 ## 协议
