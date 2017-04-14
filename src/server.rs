@@ -61,7 +61,7 @@ struct WeChat {
     uin: String,
     sid: String,
     skey: String,
-    // device_id: String,
+    device_id: String,
     pass_ticket: String,
     headers: Headers,
     user_info: Value,
@@ -89,7 +89,7 @@ impl WeChat {
             uin: String::new(),
             sid: String::new(),
             skey: String::new(),
-            // device_id: String::new(),
+            device_id: format!("e56{}", time_stamp()),
             pass_ticket: String::new(),
             headers: headers,
             user_info: Value::Null,
@@ -122,6 +122,10 @@ impl WeChat {
 
     fn set_skey(&mut self, skey: &str) {
         self.skey = skey.to_owned();
+    }
+
+    fn device_id(&self) -> &str {
+        &self.device_id
     }
 
     fn pass_ticket(&self) -> &str {
@@ -252,7 +256,7 @@ impl WeChat {
         base_obj.insert("Uin".to_owned(), json!(self.uin.parse::<usize>().unwrap()));
         base_obj.insert("Sid".to_owned(), Value::String(self.sid.clone()));
         base_obj.insert("Skey".to_owned(), Value::String(self.skey.clone()));
-        base_obj.insert("DeviceID".to_owned(), Value::String(String::new()));
+        base_obj.insert("DeviceID".to_owned(), Value::String(self.device_id.clone()));
 
         let mut obj = Map::new();
         obj.insert("BaseRequest".to_owned(), Value::Object(base_obj));
@@ -386,10 +390,11 @@ fn check_scan(uuid: String) {
         WECHAT.read().unwrap().base_data()
     };
     let url = format!("https://web.wechat.\
-                       com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}",
+                       com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}&r={}",
                       pass_ticket,
-                      skey);
+                      skey, time_stamp());
     let json = post(&url, &data).parse::<Value>().unwrap();
+    println!("{}", json["BaseResponse"]);
     {
         let mut wechat = WECHAT.write().unwrap();
         wechat.set_sync_key(&json["SyncKey"]);
@@ -487,18 +492,17 @@ fn sync_check() {
 
     println!("{:?}", headers);
 
-    let mut retries = 0;
-
     // let uid
     loop {
         let url = {
             let wechat = WECHAT.read().unwrap();
             let ts = time_stamp();
             format!("https://webpush.web.wechat.\
-                 com/cgi-bin/mmwebwx-bin/synccheck?sid={}&uin={}&skey={}&deviceid=&synckey={}&r={}&_={}",
+                 com/cgi-bin/mmwebwx-bin/synccheck?sid={}&uin={}&skey={}&deviceid={}&synckey={}&r={}&_={}",
                     wechat.sid(),
                     wechat.uin(),
                     wechat.skey(),
+                    wechat.device_id(),
                     wechat.sync_key_str(),
                     ts,
                     ts)
@@ -520,18 +524,9 @@ fn sync_check() {
         let selector: isize = caps.get(2).unwrap().as_str().parse().unwrap();
         println!("{} = {} - {}", result, retcode, selector);
 
-        // check error
-        if retcode != 0 {
-            retries += 1;
-
-            // retry
-            if retries > 10 {
-                break;
-            } else {
-                continue;
-            }
-        } else {
-            retries = 0;
+        // logout
+        if retcode == 1100 {
+            break;
         }
 
         // no new message.
