@@ -11,6 +11,8 @@
 cargo build --release
 ```
 
+> 也可以在 [Releases](https://github.com/sbwtw/pidgin-wechat/releases/) 中下载编译好的二进制文件。
+
 ## 安装
 `pidgin` 的插件只需要把对应的库文件拷贝到插件目录，重新运行 `pidgin` 即可。
 ```
