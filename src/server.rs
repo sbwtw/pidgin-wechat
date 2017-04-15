@@ -45,6 +45,7 @@ lazy_static!{
 
 #[derive(Debug)]
 enum SrvMsg {
+    ShowMessageBox(String),
     ShowVerifyImage(String),
     AddContact(User),
     AddGroup(ChatRoom),
@@ -351,8 +352,6 @@ fn check_scan(uuid: String) {
                       uuid,
                       0);
 
-    // window.code=200;
-    // window.redirect_uri="https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage?ticket=Au1vqm4uwpWOIQUCx-bMtOjT@qrticket_0&uuid=oZYNmWV5SQ==&lang=zh_CN&scan=1487767062";
     let result = get(&url);
     let reg = Regex::new(r#"redirect_uri="([^"]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
@@ -525,7 +524,7 @@ fn sync_check() {
         println!("{} = {} - {}", result, retcode, selector);
 
         // logout
-        if retcode == 1100 {
+        if retcode == 1100 || retcode == 1101 {
             break;
         }
 
@@ -536,6 +535,38 @@ fn sync_check() {
 
         check_new_message();
     }
+
+    // show logout message
+    send_server_message(SrvMsg::ShowMessageBox("You are already logged in other devices.\nplease logout and restart pidgin.".to_owned()));
+}
+
+unsafe fn show_message_box(message: &str) {
+
+    let message = CString::new(message).unwrap();
+    let title = CString::new("Wechat Notice").unwrap();
+    let ok_txt = CString::new("Ok").unwrap();
+    let cancel_txt = CString::new("Cancel").unwrap();
+
+    let group = purple_request_field_group_new(title.as_ptr());
+    let field = purple_request_field_new(message.as_ptr(),
+                                         message.as_ptr(),
+                                         PURPLE_REQUEST_FIELD_NONE);
+    purple_request_field_group_add_field(group, field);
+    let fields = purple_request_fields_new();
+    purple_request_fields_add_group(fields, group);
+    purple_request_fields(null_mut(), // handle
+                          title.as_ptr(), // title
+                          message.as_ptr(), // primary
+                          null_mut(), // secondary
+                          fields, // fields
+                          ok_txt.as_ptr(), // ok_text
+                          Some(ok_cb), // ok_cb
+                          cancel_txt.as_ptr(), // cancel_text
+                          None, // cancel_cb
+                          null_mut(), // account
+                          null_mut(), // who
+                          null_mut(), // conv
+                          null_mut()); // user_data
 }
 
 pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
@@ -636,7 +667,7 @@ fn get_uuid() -> String {
     let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
     let result = get(&url);
 
-    let reg = Regex::new(r#"uuid\s+=\s+"([\w=]+)""#).unwrap();
+    let reg = Regex::new(r#"uuid\s*=\s*"([-\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
 
     caps.get(1).unwrap().as_str().to_owned()
@@ -715,6 +746,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
 
     while let Ok(m) = rx.try_recv() {
         match m {
+            SrvMsg::ShowMessageBox(m) => show_message_box(&m),
             SrvMsg::ShowVerifyImage(path) => show_verify_image(path),
             SrvMsg::AddContact(user) => add_buddy(&user),
             SrvMsg::AddGroup(chat) => add_group(&chat),
