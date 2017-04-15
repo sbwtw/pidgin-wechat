@@ -1,5 +1,5 @@
 # Pidgin-wechat
-`pidgin-wechat` 是一个用微信网页版接口实现 `pidgin` 聊天协议的插件。目前支持联系人聊天、群聊天等功能，并支持图片消息的接收。
+`pidgin-wechat` 是一个使用微信网页版接口和 `pidgin/libpurle` IM 框架的**第三方桌面版微信程序**的实现。目前支持联系人聊天、群聊天等功能，并支持图片消息的接收。可以运行在所有 `Pidgin` 支持的平台上(Linux, Windows, MacOS)。
 
 ## 截图
 ![pidgin-wechat 截图](screenshot/2017-04-13-211409_302x579_scrot.png) 
@@ -11,12 +11,20 @@
 cargo build --release
 ```
 
+### 编译依赖
+- libpurple-dev
+
+> 依赖有可能未完全列出，仅在 Archlinux 系统、 nightly 的 rust 编译器下编译通过。
+
 > 也可以在 [Releases](https://github.com/sbwtw/pidgin-wechat/releases/) 中下载编译好的二进制文件。
 
 ## 安装
+如果使用 `cargo`，编译好的二进制文件在 `target/release` 目录下。
+
 `pidgin` 的插件只需要把对应的库文件拷贝到插件目录，重新运行 `pidgin` 即可。
 ```
-cp target/release/libwechat.so ~/.purple/plugins/
+mkdir -p ~/.purple/plugins
+cp -f libwechat.so ~/.purple/plugins/
 ```
 
 ## 项目进展
@@ -26,12 +34,15 @@ cp target/release/libwechat.so ~/.purple/plugins/
 - [x] 登录
 - [x] 收发文字消息
 - [x] 收发群聊天消息（Bugs: [#1](https://github.com/sbwtw/pidgin-wechat/issues/1) [#2](https://github.com/sbwtw/pidgin-wechat/issues/2)）
-- [x] 显示图片消息
-- [x] 显示自定义表情
+- [x] 接收图片消息
+- [x] 接收自定义表情
 - [ ] 发送文件与图片
 - [ ] 用户头像
 - [ ] 公众号
-- [ ] 表情
+- [ ] 接收富文本消息
+- [ ] 接收语音消息
+- [ ] 内置表情
+- [ ] 系统级别的消息提醒
 
 ## Hack
 目前遇到最多的问题是：
@@ -73,5 +84,8 @@ pidgin-wechat 的日志目前是输出到标准输出上的，可以在终端中
 ## Q&A
 ### 为什么使用 Pidgin/libpurple
 当前的桌面版 Wechat 实现已经很多了，并且界面更加现代化。但由于 pidgin/libpurple 对许多聊天协议都有支持，维护这个插件的主要目的在于能够在统一的平台上完成所有 IMs 的登录，不需要再登录 N 多个聊天工具。
+
+### 是否支持红包/表情包的显示
+由于数据是基于微信网页版协议的，所以像网页版没有开放的这些功能，理论上都无法实现。
 
 ## 协议
