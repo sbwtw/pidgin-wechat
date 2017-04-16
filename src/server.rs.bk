@@ -995,11 +995,7 @@ unsafe fn append_text_message(msg: &Value) {
                                        time);
             }
             None => {
-                purple_conv_chat_write(chat,
-                                       from.as_ptr(),
-                                       content_cstring.as_ptr(),
-                                       PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_SYSTEM,
-                                       time);
+                purple_conv_chat_write(chat, from.as_ptr(), content_cstring.as_ptr(), PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_SYSTEM, time);
             }
         }
     } else if dest.starts_with("@@") {
