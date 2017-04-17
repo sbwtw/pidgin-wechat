@@ -10,6 +10,7 @@ mod pointer;
 mod server;
 mod user;
 mod chatroom;
+mod message;
 
 use purple_sys::*;
 use std::os::raw::{c_void, c_char};

@@ -18,12 +18,12 @@ use serde_json::Value;
 use serde_json::Map;
 use pointer::*;
 use purple_sys::*;
+use message::*;
 use std::os::raw::{c_void, c_char, c_int};
 use std::io::*;
 use std::ffi::{CStr, CString};
 use std::ptr::null_mut;
 use std::sync::{RwLock, Mutex};
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
@@ -33,10 +33,6 @@ lazy_static!{
     pub static ref ACCOUNT: RwLock<Pointer> = RwLock::new(Pointer::new());
     static ref VERIFY_HANDLE: Mutex<Pointer> = Mutex::new(Pointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
-    static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {
-        let (tx, rx) = channel();
-        (Mutex::new(tx), Mutex::new(rx))
-    };
     // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) =
     //{let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     static ref WECHAT: RwLock<WeChat> = RwLock::new(WeChat::new());
@@ -45,17 +41,6 @@ lazy_static!{
         let connector = HttpsConnector::new(ssl);
         Client::with_connector(connector)
     };
-}
-
-#[derive(Debug)]
-enum SrvMsg {
-    ShowMessageBox(String),
-    ShowVerifyImage(String),
-    AddContact(User),
-    AddGroup(ChatRoom),
-    MessageReceived(Value),
-    AppendImageMessage(i32, Value),
-    YieldEvent,
 }
 
 // #[derive(Debug)]
@@ -327,10 +312,6 @@ impl WeChat {
 
         value
     }
-}
-
-fn send_server_message(m: SrvMsg) {
-    SRV_MSG.0.lock().unwrap().send(m).unwrap();
 }
 
 pub fn start_login() {
@@ -1239,3 +1220,4 @@ pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
 }
 
 extern "C" fn ok_cb() {}
+
