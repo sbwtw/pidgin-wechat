@@ -1,9 +1,9 @@
 # Pidgin-wechat
-`pidgin-wechat` 是一个使用微信网页版接口和 `pidgin/libpurle` IM 框架的**第三方桌面版微信程序**的实现。目前支持联系人聊天、群聊天等功能，并支持图片消息的接收。可以运行在所有 `Pidgin` 支持的平台上(Linux, Windows, MacOS)。
+`pidgin-wechat` 是一个使用微信网页版接口和 `pidgin/libpurple` IM 框架的**第三方桌面版微信程序**的实现。目前支持联系人聊天、群聊天等功能，并支持图片消息的接收。可以运行在所有 `Pidgin` 支持的平台上(Linux, Windows, MacOS)。
 
 ## 截图
 ![pidgin-wechat 截图](screenshot/2017-04-13-211409_302x579_scrot.png) 
-![pidgin-wechat 截图](screenshot/2017-04-13-211208_887x708_scrot.png)
+![pidgin-wechat 截图](screenshot/2017-04-17-141051_887x708_scrot.png)
 
 ## 构建
 使用 `Cargo` 可以很方便的构建本项目。
