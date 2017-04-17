@@ -947,6 +947,8 @@ unsafe fn process_emoji_image(msg: &Value) {
         let mut result = Vec::new();
         response.read_to_end(&mut result).unwrap();
 
+        println!("fetch image: {} {} {}", url, response.status, result.len());
+
         let img_path = CString::new(save_file(&result)).unwrap();
         let img = purple_imgstore_new_from_file(img_path.as_ptr());
         let img_data = purple_imgstore_get_data(img);
