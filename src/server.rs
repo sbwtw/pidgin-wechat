@@ -667,24 +667,6 @@ fn get_uuid() -> String {
     caps.get(1).unwrap().as_str().to_owned()
 }
 
-// fn save_qr_file<T: AsRef<str>>(qr: T) -> String {
-//     let url = format!("https://login.web.wechat.com/qrcode/{}", qr.as_ref());
-//     println!("get qr file: {}", url);
-//     let mut response = CLIENT.get(&url).send().unwrap();
-//     let mut result = Vec::new();
-//     response.read_to_end(&mut result).unwrap();
-
-//     let mut file = OpenOptions::new()
-//         .write(true)
-//         .create(true)
-//         .truncate(true)
-//         .open("/tmp/qr.png")
-//         .unwrap();
-//     file.write(&result).unwrap();
-
-//     "/tmp/qr.png".to_owned()
-// }
-
 fn get<T: AsRef<str> + Debug>(url: T) -> String {
 
     let headers = {
@@ -746,11 +728,24 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
             SrvMsg::AddGroup(chat) => add_group(&chat),
             SrvMsg::MessageReceived(json) => append_message(&json),
             SrvMsg::AppendImageMessage(id, json) => append_image_message(id, &json),
+            SrvMsg::RefreshChatMembers(chat) => refresh_chat_members(&chat),
             SrvMsg::YieldEvent => break,
         }
     }
 
     1
+}
+
+unsafe fn refresh_chat_members(chat: &str) {
+    let wechat = WECHAT.read().unwrap();
+    let chat = wechat.find_chat_by_id(chat).unwrap();
+    let conv = conversion(PURPLE_CONV_TYPE_CHAT, &chat.id());
+    let conv_chat = purple_conversation_get_chat_data(conv);
+
+    for member in chat.members() {
+        let id = CString::new(member.user_name()).unwrap();
+        purple_conv_chat_add_user(conv_chat, id.as_ptr(), null_mut(), PURPLE_CBFLAGS_NONE, 0);
+    }
 }
 
 unsafe fn add_group(chat: &ChatRoom) {
@@ -850,6 +845,9 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
     let conv = purple_find_conversation_with_account(conv_type, name_cstr.as_ptr(), account);
     // ensure not nullptr
     assert!(conv != null_mut());
+    // add members
+    send_server_message(SrvMsg::YieldEvent);
+    send_server_message(SrvMsg::RefreshChatMembers(name.to_owned()));
 
     conv
 }

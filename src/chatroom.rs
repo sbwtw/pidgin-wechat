@@ -19,20 +19,55 @@ pub struct ChatRoom {
     id: String,
     alias: String,
 
+    members: Vec<MemberUser>,
+
     token: usize,
     ptr: Pointer,
+}
+
+#[derive(Clone, Debug)]
+pub struct MemberUser {
+    user_name: String,
+    nick_name: String,
+    display_name: String,
+}
+
+impl MemberUser {
+    fn from_json(json: &Value) -> MemberUser {
+        MemberUser {
+            user_name: json["UserName"].as_str().unwrap().to_owned(),
+            nick_name: json["NickName"].as_str().unwrap().to_owned(),
+            display_name: json["DisplayName"].as_str().unwrap().to_owned(),
+        }
+    }
+
+    pub fn user_name(&self) -> String {
+        self.user_name.clone()
+    }
 }
 
 impl ChatRoom {
     pub fn from_json(json: &Value) -> ChatRoom {
 
-        ChatRoom {
+        let mut cr = ChatRoom {
             id: json["UserName"].as_str().unwrap().to_owned(),
             alias: json["NickName"].as_str().unwrap().to_owned(),
+            members: vec![],
 
             token: TOKEN.fetch_add(1, atomic::Ordering::SeqCst),
             ptr: Pointer::new(),
+        };
+
+        let members = json["MemberList"].as_array().unwrap();
+        for member in members {
+            cr.members.push(MemberUser::from_json(member));
         }
+
+        cr
+    }
+
+    pub fn members(&self) -> &Vec<MemberUser> {
+        &self.members
     }
 
     pub fn token(&self) -> usize {
@@ -83,3 +118,4 @@ impl PartialEq for ChatRoom {
 }
 
 impl Eq for ChatRoom {}
+

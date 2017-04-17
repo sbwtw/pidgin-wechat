@@ -12,12 +12,13 @@ mod user;
 mod chatroom;
 mod message;
 
-use purple_sys::*;
 use std::os::raw::{c_void, c_char};
 use std::ptr::null_mut;
 use std::boxed::Box;
 use std::ffi::{CString, CStr};
 use std::sync::RwLock;
+use purple_sys::*;
+use message::*;
 use pointer::Pointer;
 use server::ACCOUNT;
 use server::{send_im, send_chat, find_blist_chat, find_chat_token};
@@ -129,7 +130,8 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
     let chat_key = CString::new("ChatId").unwrap();
     let id = CStr::from_ptr(g_hash_table_lookup(components, chat_key.as_ptr() as *const c_void) as
                             *const i8);
-    let token = find_chat_token(id.to_string_lossy().to_mut());
+    let id_string: String = id.to_string_lossy().into_owned();
+    let token = find_chat_token(&id_string);
 
     println!("id = {:?}, token = {}", id, token);
 
@@ -138,6 +140,7 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
     serv_got_joined_chat(purple_account_get_connection(account),
                          token as i32,
                          id.as_ptr());
+    send_server_message(SrvMsg::RefreshChatMembers(id_string));
 }
 
 extern "C" fn chat_info_defaults(_: *mut PurpleConnection, _: *const c_char) -> *mut GHashTable {

@@ -22,9 +22,11 @@ pub enum SrvMsg {
     AddGroup(ChatRoom),
     MessageReceived(Value),
     AppendImageMessage(i32, Value),
+    RefreshChatMembers(String),
     YieldEvent,
 }
 
 pub fn send_server_message(m: SrvMsg) {
     SRV_MSG.0.lock().unwrap().send(m).unwrap();
 }
+
