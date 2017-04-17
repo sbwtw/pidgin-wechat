@@ -3,3 +3,4 @@ target
 # vscode config file
 .task.json
 .vscode/
+rls.toml

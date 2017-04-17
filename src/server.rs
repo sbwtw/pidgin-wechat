@@ -33,8 +33,12 @@ lazy_static!{
     pub static ref ACCOUNT: RwLock<Pointer> = RwLock::new(Pointer::new());
     static ref VERIFY_HANDLE: Mutex<Pointer> = Mutex::new(Pointer::new());
     // static ref TX: Mutex<Cell<>> = Mutex::new(Cell::new(None));
-    static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
-    // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) = {let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
+    static ref SRV_MSG: (Mutex<Sender<SrvMsg>>, Mutex<Receiver<SrvMsg>>) = {
+        let (tx, rx) = channel();
+        (Mutex::new(tx), Mutex::new(rx))
+    };
+    // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) =
+    //{let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     static ref WECHAT: RwLock<WeChat> = RwLock::new(WeChat::new());
     static ref CLIENT: Client = {
         let ssl = NativeTlsClient::new().unwrap();
@@ -411,7 +415,9 @@ fn check_scan(uuid: String) {
 
     let (url, data) = {
         let wechat = WECHAT.read().unwrap();
-        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxbatchgetcontact?type=ex&r={}&pass_ticket={}", time_stamp(), wechat.pass_ticket());
+        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/\
+                           webwxbatchgetcontact?type=ex&r={}&pass_ticket={}",
+        time_stamp(), wechat.pass_ticket());
         let data = wechat.group_info_data(&groups[..]);
 
         (url, data)
@@ -459,7 +465,9 @@ fn time_stamp() -> i64 {
 fn fetch_contact() {
     let url = {
         let wechat = WECHAT.read().unwrap();
-        format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetcontact?pass_ticket={}&skey={}&r={}&seq=0", wechat.pass_ticket(), wechat.skey(), time_stamp())
+        format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/\
+                 webwxgetcontact?pass_ticket={}&skey={}&r={}&seq=0",
+        wechat.pass_ticket(), wechat.skey(), time_stamp())
     };
 
     let result = get(url).parse::<Value>().unwrap();
@@ -496,8 +504,8 @@ fn sync_check() {
         let url = {
             let wechat = WECHAT.read().unwrap();
             let ts = time_stamp();
-            format!("https://webpush.web.wechat.\
-                 com/cgi-bin/mmwebwx-bin/synccheck?sid={}&uin={}&skey={}&deviceid={}&synckey={}&r={}&_={}",
+            format!("https://webpush.web.wechat.com/cgi-bin/mmwebwx-bin/synccheck\
+            ?sid={}&uin={}&skey={}&deviceid={}&synckey={}&r={}&_={}",
                     wechat.sid(),
                     wechat.uin(),
                     wechat.skey(),
@@ -537,7 +545,10 @@ fn sync_check() {
     }
 
     // show logout message
-    send_server_message(SrvMsg::ShowMessageBox("You are already logged in other devices.\nplease logout and restart pidgin.".to_owned()));
+    let m = "You are already logged in other devices.\nplease logout and restart pidgin."
+        .to_owned();
+    let m = SrvMsg::ShowMessageBox(m);
+    send_server_message(m);
 }
 
 unsafe fn show_message_box(message: &str) {
@@ -605,7 +616,8 @@ fn send_message(who: &str, msg: &str) {
 
     let (url, data) = {
         let wechat = WECHAT.read().unwrap();
-        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?pass_ticket={}", wechat.pass_ticket());
+        let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?\
+                           pass_ticket={}", wechat.pass_ticket());
         let data = wechat.message_send_data(who, msg);
 
         (url, data)
@@ -664,7 +676,8 @@ fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
 }
 
 fn get_uuid() -> String {
-    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
+    let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=\
+               https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
     let result = get(&url);
 
     let reg = Regex::new(r#"uuid\s*=\s*"([-\w=]+)""#).unwrap();
@@ -913,7 +926,8 @@ fn append_image_message(id: i32, msg: &Value) {
 unsafe fn process_image_message(msg: &Value) {
 
     let msg_id = msg["MsgId"].as_str().unwrap();
-    let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetmsgimg?&MsgID={}&skey={}", msg_id, WECHAT.read().unwrap().skey());
+    let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxgetmsgimg?&MsgID={}&skey={}",
+                       msg_id, WECHAT.read().unwrap().skey());
 
     let msg = msg.clone();
 
