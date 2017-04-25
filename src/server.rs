@@ -17,7 +17,7 @@ use chatroom::ChatRoom;
 use serde_json::Value;
 use serde_json::Map;
 use pointer::*;
-use purple_sys::*;
+use libpurple_rust::*;
 use message::*;
 use std::os::raw::{c_void, c_char, c_int};
 use std::io::*;

@@ -11,7 +11,7 @@ crate-type = ["dylib"]
 [dependencies]
 libc = "*"
 glib-sys = "*"
-purple-sys = { path = "purple-sys" }
+libpurple-rust = "*"
 lazy_static = "*"
 hyper = "*"
 hyper-native-tls = "*"
