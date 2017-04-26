@@ -1,4 +1,4 @@
-extern crate libpurple_rust;
+extern crate purple_sys;
 extern crate glib_sys;
 extern crate libc;
 #[macro_use]
@@ -17,7 +17,7 @@ use std::ptr::null_mut;
 use std::boxed::Box;
 use std::ffi::{CString, CStr};
 use std::sync::RwLock;
-use libpurple_rust::*;
+use purple_sys::*;
 use message::*;
 use pointer::Pointer;
 use server::ACCOUNT;
