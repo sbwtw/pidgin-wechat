@@ -337,7 +337,7 @@ fn check_scan(uuid: String) {
                       uuid,
                       0);
 
-    let result = get(&url);
+    let result = get(&url).unwrap();
     let reg = Regex::new(r#"redirect_uri="([^"]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
     let uri = caps.get(1).unwrap().as_str();
@@ -377,7 +377,7 @@ fn check_scan(uuid: String) {
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}&r={}",
                       pass_ticket,
                       skey, time_stamp());
-    let json = post(&url, &data).parse::<Value>().unwrap();
+    let json = post(&url, &data).unwrap().parse::<Value>().unwrap();
     println!("{}", json["BaseResponse"]);
     {
         let mut wechat = WECHAT.write().unwrap();
@@ -404,7 +404,7 @@ fn check_scan(uuid: String) {
         (url, data)
     };
     let result = post(&url, &data);
-    let json = result.parse::<Value>().unwrap();
+    let json = result.unwrap().parse::<Value>().unwrap();
     let ref groups = json["ContactList"].as_array().unwrap();
     if groups.len() != 0 {
         let mut wechat = WECHAT.write().unwrap();
@@ -451,7 +451,7 @@ fn fetch_contact() {
         wechat.pass_ticket(), wechat.skey(), time_stamp())
     };
 
-    let result = get(url).parse::<Value>().unwrap();
+    let result = get(url).unwrap().parse::<Value>().unwrap();
     let ref member_list = result["MemberList"].as_array().unwrap();
 
     // yield event loop
@@ -498,11 +498,7 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = CLIENT
-            .get(&url)
-            .headers(headers.clone())
-            .send()
-            .unwrap();
+        let mut response = CLIENT.get(&url).headers(headers.clone()).send().unwrap();
         let mut result = String::new();
         response.read_to_string(&mut result).unwrap();
 
@@ -638,12 +634,9 @@ fn check_new_message() {
     let result = post(&url, &data);
 
     // refersh sync check key
-    let json: Value = result.parse().unwrap();
+    let json: Value = result.unwrap().parse().unwrap();
     {
-        WECHAT
-            .write()
-            .unwrap()
-            .set_sync_key(&json["SyncCheckKey"]);
+        WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
     }
 
     send_server_message(SrvMsg::MessageReceived(json));
@@ -659,7 +652,7 @@ fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
 fn get_uuid() -> String {
     let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=\
                https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
-    let result = get(&url);
+    let result = get(&url).unwrap();
 
     let reg = Regex::new(r#"uuid\s*=\s*"([-\w=]+)""#).unwrap();
     let caps = reg.captures(&result).unwrap();
@@ -667,18 +660,26 @@ fn get_uuid() -> String {
     caps.get(1).unwrap().as_str().to_owned()
 }
 
-fn get<T: AsRef<str> + Debug>(url: T) -> String {
+fn get<T: AsRef<str> + Debug>(url: T) -> Option<String> {
 
     let headers = {
         WECHAT.read().unwrap().headers()
     };
 
     println!("get: {:?}", url);
-    let mut response = CLIENT
-        .get(url.as_ref())
-        .headers(headers)
-        .send()
-        .unwrap();
+    let mut response = match CLIENT.get(url.as_ref()).headers(headers).send() {
+        Ok(response) => response,
+        Err(e) => {
+            println!("Err: {:?}", e);
+            return None;
+        }
+    };
+
+    if !response.status.is_success() {
+        println!("response: {:?}", response);
+        return None;
+    }
+
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     if result.len() > 500 {
@@ -687,10 +688,10 @@ fn get<T: AsRef<str> + Debug>(url: T) -> String {
         println!("result: {}", result);
     }
 
-    result
+    Some(result)
 }
 
-fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
+fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> Option<String> {
 
     let headers = {
         WECHAT.read().unwrap().headers()
@@ -699,12 +700,23 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
              url,
              headers,
              data);
-    let mut response = CLIENT
-        .post(url.as_ref())
-        .headers(headers)
-        .body(&data.to_string())
-        .send()
-        .unwrap();
+    let mut response = match CLIENT
+              .post(url.as_ref())
+              .headers(headers)
+              .body(&data.to_string())
+              .send() {
+        Ok(response) => response,
+        Err(e) => {
+            println!("Err: {:?}", e);
+            return None;
+        }
+    };
+
+    if !response.status.is_success() {
+        println!("response: {:?}", response);
+        return None;
+    }
+
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     if result.len() > 500 {
@@ -713,7 +725,7 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> String {
         println!("result: {}", result);
     }
 
-    result
+    Some(result)
 }
 
 unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
