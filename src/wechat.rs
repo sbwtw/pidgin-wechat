@@ -232,6 +232,14 @@ pub extern "C" fn purple_init_plugin(plugin: *mut PurplePlugin) -> i32 {
     // save plugin pointer
     PLUGIN.write().unwrap().set(plugin as *mut c_void);
 
+    let id = CString::new("prpl-sbwtw-web_wechat").unwrap();
+    let name = CString::new("Wechat").unwrap();
+    let version = CString::new("0.0.0").unwrap();
+    let summary = CString::new("Web wechat protocol implements").unwrap();
+    let description = CString::new("Web wechat protocol implements").unwrap();
+    let author = CString::new("sbwtw <sbw@sbw.so>").unwrap();
+    let home_page = CString::new("http://blog.sbw.so").unwrap();
+
     let mut info = Box::new(PurplePluginInfo::new());
     let mut extra_info = Box::new(PurplePluginProtocolInfo::new());
 
@@ -249,6 +257,13 @@ pub extern "C" fn purple_init_plugin(plugin: *mut PurplePlugin) -> i32 {
         extra_info.find_blist_chat = Some(find_blist_chat);
         extra_info.send_im = Some(send_im);
 
+        info.id = id.into_raw();
+        info.name = name.into_raw();
+        info.version = version.into_raw();
+        info.summary = summary.into_raw();
+        info.description = description.into_raw();
+        info.author = author.into_raw();
+        info.homepage = home_page.into_raw();
         info.load = Some(callback);
         info.actions = Some(actions);
         info.extra_info = Box::into_raw(extra_info) as *mut c_void;
