@@ -165,6 +165,10 @@ impl WeChat {
         self.user_info["UserName"].as_str().unwrap()
     }
 
+    fn nick_name(&self) -> &str {
+        self.user_info["NickName"].as_str().unwrap()
+    }
+
     fn set_cookies(&mut self, cookies: &SetCookie) {
         println!("cookies: {:?}", cookies);
         let ref mut jar = self.headers.get_mut::<Cookie>().unwrap();
@@ -419,8 +423,8 @@ fn check_scan(uuid: String) {
     // refersh current user name
     unsafe {
         let uname = CString::new(WECHAT.read().unwrap().user_name()).unwrap();
-        let alias = CString::new("You").unwrap();
-        println!("set usernmae: {:?}", uname);
+        let alias = CString::new(WECHAT.read().unwrap().nick_name()).unwrap();
+        println!("update account info: {:?} {:?}", uname, alias);
         purple_account_set_username(ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
                                     uname.as_ptr());
         purple_account_set_alias(ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
