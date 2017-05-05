@@ -498,7 +498,15 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = CLIENT.get(&url).headers(headers.clone()).send().unwrap();
+        let mut response = match CLIENT.get(&url).headers(headers.clone()).send() {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+
+        if !response.status.is_success() {
+            continue;
+        }
+
         let mut result = String::new();
         response.read_to_string(&mut result).unwrap();
 
@@ -675,14 +683,9 @@ fn get<T: AsRef<str> + Debug>(url: T) -> Option<String> {
         }
     };
 
-    if !response.status.is_success() {
-        println!("response: {:?}", response);
-        return None;
-    }
-
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    if result.len() > 500 {
+    if result.len() > 500 && response.status.is_success() {
         println!("result: {}", &result[0..300]);
     } else {
         println!("result: {}", result);
@@ -712,14 +715,9 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> Option<String> {
         }
     };
 
-    if !response.status.is_success() {
-        println!("response: {:?}", response);
-        return None;
-    }
-
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    if result.len() > 500 {
+    if result.len() > 500 && response.status.is_success() {
         println!("result: {}", &result[0..300]);
     } else {
         println!("result: {}", result);
