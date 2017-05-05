@@ -484,6 +484,9 @@ fn sync_check() {
 
     println!("{:?}", headers);
 
+    let mut client = Client::with_connector(HttpsConnector::new(NativeTlsClient::new().unwrap()));
+    client.set_read_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
+
     // let uid
     loop {
         let url = {
@@ -502,7 +505,7 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = match CLIENT.get(&url).headers(headers.clone()).send() {
+        let mut response = match client.get(&url).headers(headers.clone()).send() {
             Ok(response) => response,
             Err(_) => continue,
         };
