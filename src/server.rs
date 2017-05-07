@@ -30,6 +30,14 @@ use std::thread;
 use std::fmt::Debug;
 use std::collections::BTreeSet;
 
+macro_rules! cow_replace {
+    ( $item:ident, $src:expr, $dest:expr ) => {
+        if $item.contains($src) {
+            $item = Cow::Owned($item.replace($src, $dest));
+        }
+    }
+}
+
 lazy_static!{
     pub static ref ACCOUNT: RwLock<Pointer> = RwLock::new(Pointer::new());
     static ref VERIFY_HANDLE: Mutex<Pointer> = Mutex::new(Pointer::new());
@@ -623,14 +631,10 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
 fn preprocess_send_message<'a>(msg: &'a str) -> Option<Cow<'a, str>> {
 
     let mut ret = Cow::Borrowed(msg);
-
-    if ret.contains("<br>") {
-        ret = Cow::Owned(ret.replace("<br>", "\n"));
-    }
-
-    if ret.contains("&quot;") {
-        ret = Cow::Owned(ret.replace("&quot;", r#"""#));
-    }
+    cow_replace!(ret, "<br>", "\n");
+    cow_replace!(ret, "&quot;", r#"""#);
+    cow_replace!(ret, "&lt;", "<");
+    cow_replace!(ret, "&gt;", ">");
 
     Some(ret)
 }
