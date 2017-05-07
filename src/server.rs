@@ -19,6 +19,7 @@ use serde_json::Map;
 use pointer::*;
 use purple_sys::*;
 use message::*;
+use std::borrow::Cow;
 use std::os::raw::{c_void, c_char, c_int};
 use std::io::*;
 use std::ffi::{CStr, CString};
@@ -51,11 +52,11 @@ struct WeChat {
     uin: String,
     sid: String,
     skey: String,
-    device_id: String,
     pass_ticket: String,
     headers: Headers,
     user_info: Value,
     sync_keys: Value,
+    system_time: i64,
 
     user_list: BTreeSet<User>,
     chat_list: BTreeSet<ChatRoom>,
@@ -79,11 +80,11 @@ impl WeChat {
             uin: String::new(),
             sid: String::new(),
             skey: String::new(),
-            device_id: format!("e56{}", time_stamp()),
             pass_ticket: String::new(),
             headers: headers,
             user_info: Value::Null,
             sync_keys: Value::Null,
+            system_time: 0,
 
             user_list: BTreeSet::new(),
             chat_list: BTreeSet::new(),
@@ -114,8 +115,20 @@ impl WeChat {
         self.skey = skey.to_owned();
     }
 
-    fn device_id(&self) -> &str {
-        &self.device_id
+    fn device_id(&self) -> String {
+        format!("e56{}", time_stamp())
+    }
+
+    fn system_time(&mut self) -> i64 {
+        let t = self.system_time;
+        self.system_time += 1;
+
+        t
+    }
+
+    fn set_system_time(&mut self, time: &Value) {
+        println!("set sys time: {:?}", time);
+        self.system_time = time.as_i64().unwrap();
     }
 
     fn pass_ticket(&self) -> &str {
@@ -248,9 +261,9 @@ impl WeChat {
 
         let mut base_obj = Map::with_capacity(4);
         base_obj.insert("Uin".to_owned(), json!(self.uin.parse::<usize>().unwrap()));
-        base_obj.insert("Sid".to_owned(), Value::String(self.sid.clone()));
-        base_obj.insert("Skey".to_owned(), Value::String(self.skey.clone()));
-        base_obj.insert("DeviceID".to_owned(), Value::String(self.device_id.clone()));
+        base_obj.insert("Sid".to_owned(), json!(self.sid));
+        base_obj.insert("Skey".to_owned(), json!(self.skey));
+        base_obj.insert("DeviceID".to_owned(), json!(self.device_id()));
 
         let mut obj = Map::new();
         obj.insert("BaseRequest".to_owned(), Value::Object(base_obj));
@@ -382,10 +395,10 @@ fn check_scan(uuid: String) {
                       pass_ticket,
                       skey, time_stamp());
     let json = post(&url, &data).unwrap().parse::<Value>().unwrap();
-    println!("{}", json["BaseResponse"]);
     {
         let mut wechat = WECHAT.write().unwrap();
         wechat.set_sync_key(&json["SyncKey"]);
+        wechat.set_system_time(&json["SystemTime"]);
         wechat.set_user_info(&json);
     }
 
@@ -398,6 +411,16 @@ fn check_scan(uuid: String) {
         }
     }
 
+    // status notify
+    let url = format!("https://web.wechat.\
+                       com/cgi-bin/mmwebwx-bin/webwxstatusnotify?pass_ticket={}",
+                      pass_ticket);
+    let data = WECHAT.read().unwrap().status_notify_data();
+    // TODO: check result
+    let r = post(&url, &data).unwrap();
+    println!("status notify result: {}", r);
+
+    // get contact
     let (url, data) = {
         let wechat = WECHAT.read().unwrap();
         let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/\
@@ -417,9 +440,6 @@ fn check_scan(uuid: String) {
         }
     }
 
-    // fetch contact list
-    thread::spawn(|| fetch_contact());
-
     // refersh current user name
     unsafe {
         let uname = CString::new(WECHAT.read().unwrap().user_name()).unwrap();
@@ -431,13 +451,8 @@ fn check_scan(uuid: String) {
                                  alias.as_ptr());
     }
 
-    // status notify
-    let url = format!("https://web.wechat.\
-                       com/cgi-bin/mmwebwx-bin/webwxstatusnotify?lang=zh_CN&pass_ticket={}",
-                      pass_ticket);
-    let data = WECHAT.read().unwrap().status_notify_data();
-    // TODO: check result
-    let _ = post(&url, &data);
+    // fetch contact list
+    thread::spawn(|| fetch_contact());
 
     // start message check loop
     thread::spawn(|| sync_check());
@@ -490,6 +505,9 @@ fn sync_check() {
     // let uid
     loop {
         let url = {
+            let t = {
+                WECHAT.write().unwrap().system_time()
+            };
             let wechat = WECHAT.read().unwrap();
             let ts = time_stamp();
             format!("https://webpush.web.wechat.com/cgi-bin/mmwebwx-bin/synccheck\
@@ -500,7 +518,7 @@ fn sync_check() {
                     wechat.device_id(),
                     wechat.sync_key_str(),
                     ts,
-                    ts)
+                    t)
         };
 
         println!("sync check url: {}", url);
@@ -602,15 +620,35 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
     0
 }
 
+fn preprocess_send_message<'a>(msg: &'a str) -> Option<Cow<'a, str>> {
+
+    let mut ret = Cow::Borrowed(msg);
+
+    if ret.contains("<br>") {
+        ret = Cow::Owned(ret.replace("<br>", "\n"));
+    }
+
+    if ret.contains("&quot;") {
+        ret = Cow::Owned(ret.replace("&quot;", r#"""#));
+    }
+
+    Some(ret)
+}
+
 fn send_message(who: &str, msg: &str) {
 
     println!("send_message: {}: {}", who, msg);
+
+    let msg = match preprocess_send_message(msg) {
+        Some(m) => m,
+        _ => return,
+    };
 
     let (url, data) = {
         let wechat = WECHAT.read().unwrap();
         let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxsendmsg?\
                            pass_ticket={}", wechat.pass_ticket());
-        let data = wechat.message_send_data(who, msg);
+        let data = wechat.message_send_data(who, &*msg);
 
         (url, data)
     };
