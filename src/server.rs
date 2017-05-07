@@ -4,12 +4,14 @@ extern crate hyper;
 extern crate hyper_native_tls;
 extern crate regex;
 extern crate time;
+extern crate crypto;
 
 use self::hyper::Client;
 use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
+// use self::crypto::md5::Md5;
 use glib_sys;
 use libc;
 use user::User;
@@ -28,6 +30,7 @@ use std::sync::{RwLock, Mutex};
 use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
+use std::fmt::Write as FmtWrite;
 use std::collections::BTreeSet;
 
 macro_rules! cow_replace {
@@ -628,7 +631,61 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
     0
 }
 
+unsafe fn upload_picture(id: usize) {
+    println!("upload pic for ID = {}", id);
+
+    let image = purple_imgstore_find_by_id(id as i32);
+    let img_name = CStr::from_ptr(purple_imgstore_get_filename(image)).to_string_lossy();
+    let img_size = purple_imgstore_get_size(image);
+
+    println!("filename: {}", img_name);
+    println!("filesize: {}", img_size);
+
+    // boundary
+    const BOUNDARY: &'static str = "---------------------------162304996837655933156023736";
+
+    let mut buf = String::new();
+    writeln!(buf, "{}", BOUNDARY).unwrap();
+    writeln!(buf, r#"Content-Disposition: form-data; name="id"#).unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "WU_FILE_0").unwrap();
+
+    writeln!(buf, "{}", BOUNDARY).unwrap();
+    writeln!(buf, r#"Content-Disposition: form-data; name="name"#).unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "{}", img_name).unwrap();
+
+    writeln!(buf, "{}", BOUNDARY).unwrap();
+    writeln!(buf, r#"Content-Disposition: form-data; name="type"#).unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "image/png").unwrap();
+
+    writeln!(buf, "{}", BOUNDARY).unwrap();
+    writeln!(buf, r#"Content-Disposition: form-data; name="lastModifiedDate"#).unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "Fri May 05 2017 20:12:39 GMT+0800 (CST)").unwrap();
+
+    writeln!(buf, "{}", BOUNDARY).unwrap();
+    writeln!(buf, r#"Content-Disposition: form-data; name="size"#).unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "{}", img_size).unwrap();
+
+    writeln!(buf, "{}", BOUNDARY).unwrap();
+    writeln!(buf, r#"Content-Disposition: form-data; name="mediatype"#).unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "pic").unwrap();
+}
+
 fn preprocess_send_message<'a>(msg: &'a str) -> Option<Cow<'a, str>> {
+
+    let r = Regex::new(r#"<IMG ID="(\d+)">"#).unwrap();
+
+    if let Some(caps) = r.captures(msg) {
+        unsafe {
+            upload_picture(caps.get(1).unwrap().as_str().parse().unwrap());
+        }
+        return None;
+    }
 
     let mut ret = Cow::Borrowed(msg);
     cow_replace!(ret, "<br>", "\n");
