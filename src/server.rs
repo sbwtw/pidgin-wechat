@@ -11,7 +11,8 @@ use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
-// use self::crypto::md5::Md5;
+use self::crypto::md5::Md5;
+use self::crypto::digest::Digest;
 use glib_sys;
 use libc;
 use user::User;
@@ -22,7 +23,7 @@ use pointer::*;
 use purple_sys::*;
 use message::*;
 use std::borrow::Cow;
-use std::os::raw::{c_void, c_char, c_int};
+use std::os::raw::{c_void, c_char, c_uchar, c_int};
 use std::io::*;
 use std::ffi::{CStr, CString};
 use std::ptr::null_mut;
@@ -30,7 +31,6 @@ use std::sync::{RwLock, Mutex};
 use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
-use std::fmt::Write as FmtWrite;
 use std::collections::BTreeSet;
 
 macro_rules! cow_replace {
@@ -641,14 +641,24 @@ unsafe fn upload_picture(id: usize) {
     let image = purple_imgstore_find_by_id(id as i32);
     let img_name = CStr::from_ptr(purple_imgstore_get_filename(image)).to_string_lossy();
     let img_size = purple_imgstore_get_size(image);
+    let img_data = purple_imgstore_get_data(image);
+
+    let mut raw_data = Vec::<u8>::with_capacity(img_size);
+    raw_data.set_len(img_size);
+    std::ptr::copy(img_data as *const c_uchar, raw_data.as_mut_ptr(), img_size);
+
+    let mut md5 = Md5::new();
+    md5.input(&raw_data[..]);
+    let md5 = md5.result_str();
 
     println!("filename: {}", img_name);
     println!("filesize: {}", img_size);
+    println!("filemd5: {}", md5);
 
     // boundary
     const BOUNDARY: &'static str = "---------------------------162304996837655933156023736";
 
-    let mut buf = String::new();
+    let mut buf = Vec::<u8>::new();
     writeln!(buf, "{}", BOUNDARY).unwrap();
     writeln!(buf, r#"Content-Disposition: form-data; name="id"#).unwrap();
     writeln!(buf).unwrap();
@@ -678,6 +688,16 @@ unsafe fn upload_picture(id: usize) {
     writeln!(buf, r#"Content-Disposition: form-data; name="mediatype"#).unwrap();
     writeln!(buf).unwrap();
     writeln!(buf, "pic").unwrap();
+
+    buf.append(&mut raw_data);
+    writeln!(buf, "\n").unwrap();
+
+    writeln!(buf, "{}--", BOUNDARY).unwrap();
+
+    // write to file
+    let mut file = File::create("/tmp/dump.txt").unwrap();
+    file.write_all(&buf[..]).unwrap();
+    file.flush().unwrap();
 }
 
 fn preprocess_send_message<'a>(msg: &'a str) -> Option<Cow<'a, str>> {
