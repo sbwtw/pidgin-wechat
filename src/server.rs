@@ -51,7 +51,11 @@ lazy_static!{
     static ref CLIENT: Client = {
         let ssl = NativeTlsClient::new().unwrap();
         let connector = HttpsConnector::new(ssl);
-        Client::with_connector(connector)
+        let mut client = Client::with_connector(connector);
+        client.set_read_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
+        client.set_write_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
+
+        client
     };
 }
 
@@ -746,6 +750,9 @@ fn check_new_message() {
     };
 
     let result = post(&url, &data);
+    if result.is_none() {
+        return;
+    }
 
     // refersh sync check key
     let json: Value = result.unwrap().parse().unwrap();
