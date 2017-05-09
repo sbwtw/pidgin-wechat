@@ -5,14 +5,18 @@ extern crate hyper_native_tls;
 extern crate regex;
 extern crate time;
 extern crate crypto;
+extern crate multipart;
 
 use self::hyper::Client;
+use self::hyper::client::Request;
 use self::hyper::header::{SetCookie, Cookie, Headers};
 use self::hyper::net::HttpsConnector;
+use self::hyper::method::Method;
 use self::hyper_native_tls::NativeTlsClient;
 use self::regex::Regex;
 use self::crypto::md5::Md5;
 use self::crypto::digest::Digest;
+use self::multipart::client::Multipart;
 use glib_sys;
 use libc;
 use user::User;
@@ -86,8 +90,7 @@ impl WeChat {
         headers.set_raw("ContentType",
                         vec![b"application/json; charset=UTF-8".to_vec()]);
         headers.set_raw("Host", vec![b"web.wechat.com".to_vec()]);
-        headers.set_raw("Referer",
-                        vec![b"https://web.wechat.com/?&lang=zh_CN".to_vec()]);
+        headers.set_raw("Referer", vec![b"https://web.wechat.com/".to_vec()]);
         headers.set_raw("Accept",
                         vec![b"application/json, text/plain, */*".to_vec()]);
 
@@ -144,6 +147,24 @@ impl WeChat {
     fn set_system_time(&mut self, time: &Value) {
         println!("set sys time: {:?}", time);
         self.system_time = time.as_i64().unwrap();
+    }
+
+    fn data_ticket(&self) -> Option<&str> {
+
+        let headers = self.headers.get::<Cookie>();
+        if headers.is_none() {
+            return None;
+        }
+
+        for c in headers.unwrap().iter() {
+            let mut split = c.split('=');
+
+            if split.next() == Some("webwx_data_ticket") {
+                return split.next();
+            }
+        }
+
+        None
     }
 
     fn pass_ticket(&self) -> &str {
@@ -284,6 +305,22 @@ impl WeChat {
         obj.insert("BaseRequest".to_owned(), Value::Object(base_obj));
 
         Value::Object(obj)
+    }
+
+    fn image_upload_data(&self, img_size: usize, img_md5: &str, dest_name: &str) -> Value {
+        let mut value = self.base_data();
+
+        value["UploadType"] = json!(2);
+        value["ClientMediaId"] = json!(time_stamp());
+        value["TotalLen"] = json!(img_size);
+        value["StartPos"] = json!(0);
+        value["DataLen"] = json!(img_size);
+        value["MediaType"] = json!(4);
+        value["FromUserName"] = json!(self.user_name());
+        value["ToUserName"] = json!(dest_name);
+        value["FileMd5"] = json!(img_md5);
+
+        value
     }
 
     fn status_notify_data(&self) -> Value {
@@ -635,7 +672,7 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
     0
 }
 
-unsafe fn upload_picture(id: usize) {
+unsafe fn upload_picture(id: usize, dest_name: &str) {
     println!("upload pic for ID = {}", id);
 
     let image = purple_imgstore_find_by_id(id as i32);
@@ -651,62 +688,80 @@ unsafe fn upload_picture(id: usize) {
     md5.input(&raw_data[..]);
     let md5 = md5.result_str();
 
+    let req_json = WECHAT
+        .read()
+        .unwrap()
+        .image_upload_data(img_size, &md5, dest_name);
+    let req_json = format!("{}", req_json);
+
     println!("filename: {}", img_name);
     println!("filesize: {}", img_size);
     println!("filemd5: {}", md5);
+    println!("req_json: {}", req_json);
 
-    // boundary
-    const BOUNDARY: &'static str = "---------------------------162304996837655933156023736";
+    let ticket = WECHAT.read().unwrap().data_ticket().unwrap().to_owned();
+    let ticket = ticket.replace("%2B", "+");
+    let ticket = ticket.replace("%2F", "/");
+    println!("ticket = {:?}", ticket);
 
-    let mut buf = Vec::<u8>::new();
-    writeln!(buf, "{}", BOUNDARY).unwrap();
-    writeln!(buf, r#"Content-Disposition: form-data; name="id"#).unwrap();
-    writeln!(buf).unwrap();
-    writeln!(buf, "WU_FILE_0").unwrap();
+    let pass_ticket = WECHAT.read().unwrap().pass_ticket().to_owned();
+    let pass_ticket = pass_ticket.replace("%2B", "+");
+    let pass_ticket = pass_ticket.replace("%2F", "/");
 
-    writeln!(buf, "{}", BOUNDARY).unwrap();
-    writeln!(buf, r#"Content-Disposition: form-data; name="name"#).unwrap();
-    writeln!(buf).unwrap();
-    writeln!(buf, "{}", img_name).unwrap();
+    let url = "https://file.web.wechat.com/cgi-bin/mmwebwx-bin/webwxuploadmedia?f=json";
+    let mut req = Request::with_connector(Method::Post,
+                                          url.parse().unwrap(),
+                                          &HttpsConnector::new(NativeTlsClient::new().unwrap()))
+            .unwrap();
+    req.headers_mut()
+        .set_raw("Referer", vec![b"https://web.wechat.com/".to_vec()]);
+    req.headers_mut()
+        .set_raw("Origin", vec![b"https://web.wechat.com/".to_vec()]);
+    req.headers_mut().set_raw("Accept", vec![b"*/*".to_vec()]);
+    req.headers_mut()
+        .set_raw("Accept-Language",
+                 vec![b"zh-CN,en-US;q=0.7,en;q=0.3".to_vec()]);
+    req.headers_mut()
+        .set_raw("Accept-Encoding", vec![b"gzip, deflate, br".to_vec()]);
+    req.headers_mut()
+        .set_raw("User-Agent",
+                 vec![b"Mozilla/5.0 (Windows NT 10.0; WOW64) \
+    AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.110 Safari/537.36".to_vec()]);
 
-    writeln!(buf, "{}", BOUNDARY).unwrap();
-    writeln!(buf, r#"Content-Disposition: form-data; name="type"#).unwrap();
-    writeln!(buf).unwrap();
-    writeln!(buf, "image/png").unwrap();
+    let mut multipart = Multipart::from_request(req).unwrap();
 
-    writeln!(buf, "{}", BOUNDARY).unwrap();
-    writeln!(buf, r#"Content-Disposition: form-data; name="lastModifiedDate"#).unwrap();
-    writeln!(buf).unwrap();
-    writeln!(buf, "Fri May 05 2017 20:12:39 GMT+0800 (CST)").unwrap();
+    multipart.write_text("id", "WU_FILE_0").unwrap();
+    multipart.write_text("name", &img_name).unwrap();
+    multipart.write_text("type", "image/png").unwrap();
+    multipart
+        .write_text("lastModifiedDate",
+                    "Tue May 09 2017 14:21:02 GMT+0800 (CST)")
+        .unwrap();
+    multipart
+        .write_text("size", format!("{}", img_size))
+        .unwrap();
+    multipart.write_text("mediatype", "pic").unwrap();
+    multipart
+        .write_text("uploadmediarequest", req_json)
+        .unwrap();
+    multipart.write_text("webwx_data_ticket", ticket).unwrap();
+    multipart.write_text("pass_ticket", pass_ticket).unwrap();
+    multipart.write_file("filename", "/tmp/1.png").unwrap();
 
-    writeln!(buf, "{}", BOUNDARY).unwrap();
-    writeln!(buf, r#"Content-Disposition: form-data; name="size"#).unwrap();
-    writeln!(buf).unwrap();
-    writeln!(buf, "{}", img_size).unwrap();
-
-    writeln!(buf, "{}", BOUNDARY).unwrap();
-    writeln!(buf, r#"Content-Disposition: form-data; name="mediatype"#).unwrap();
-    writeln!(buf).unwrap();
-    writeln!(buf, "pic").unwrap();
-
-    buf.append(&mut raw_data);
-    writeln!(buf, "\n").unwrap();
-
-    writeln!(buf, "{}--", BOUNDARY).unwrap();
-
-    // write to file
-    let mut file = File::create("/tmp/dump.txt").unwrap();
-    file.write_all(&buf[..]).unwrap();
-    file.flush().unwrap();
+    let mut response = multipart.send().unwrap();
+    let mut res = String::new();
+    response.read_to_string(&mut res).unwrap();
+    println!("{}", res);
+    println!("{:?}", response);
 }
 
-fn preprocess_send_message<'a>(msg: &'a str) -> Option<Cow<'a, str>> {
+fn preprocess_send_message<'a>(msg: &'a str, dest_name: &str) -> Option<Cow<'a, str>> {
 
     let r = Regex::new(r#"<IMG ID="(\d+)">"#).unwrap();
 
     if let Some(caps) = r.captures(msg) {
         unsafe {
-            upload_picture(caps.get(1).unwrap().as_str().parse().unwrap());
+            upload_picture(caps.get(1).unwrap().as_str().parse().unwrap(), dest_name);
         }
         return None;
     }
@@ -724,7 +779,7 @@ fn send_message(who: &str, msg: &str) {
 
     println!("send_message: {}: {}", who, msg);
 
-    let msg = match preprocess_send_message(msg) {
+    let msg = match preprocess_send_message(msg, who) {
         Some(m) => m,
         _ => return,
     };
