@@ -408,7 +408,7 @@ fn check_scan(uuid: String) {
 
     let result = get(&url).unwrap();
     let reg = Regex::new(r#"redirect_uri="([^"]+)""#).unwrap();
-    let caps = reg.captures(&result).unwrap();
+    let caps = reg.captures(&result).expect("Can't find redirect uri");
     let uri = caps.get(1).unwrap().as_str();
 
     // scan successful, close dialog
@@ -418,7 +418,7 @@ fn check_scan(uuid: String) {
     // webwxnewloginpage
     let url = format!("{}&fun=new&version=v2", uri);
     println!("login with: {}", url);
-    let mut response = CLIENT.get(&url).send().unwrap();
+    let mut response = CLIENT.get(&url).send().expect("login failed");
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     println!("login result: {}", result);
@@ -446,7 +446,10 @@ fn check_scan(uuid: String) {
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}&r={}",
                       pass_ticket,
                       skey, time_stamp());
-    let json = post(&url, &data).unwrap().parse::<Value>().unwrap();
+    let json = post(&url, &data)
+        .unwrap()
+        .parse::<Value>()
+        .expect("init failed");
     {
         let mut wechat = WECHAT.write().unwrap();
         wechat.set_sync_key(&json["SyncKey"]);
