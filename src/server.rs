@@ -696,7 +696,7 @@ unsafe fn upload_picture(id: usize, dest_name: &str) {
         .read()
         .unwrap()
         .image_upload_data(img_size, &md5, dest_name);
-    let req_json = format!("{}", req_json);
+    let req_json = stringify!(req_json);
 
     println!("filename: {}", img_name);
     println!("filesize: {}", img_size);
@@ -740,9 +740,7 @@ unsafe fn upload_picture(id: usize, dest_name: &str) {
         .write_text("lastModifiedDate",
                     "Tue May 09 2017 14:21:02 GMT+0800 (CST)")
         .unwrap();
-    multipart
-        .write_text("size", format!("{}", img_size))
-        .unwrap();
+    multipart.write_text("size", stringify!(img_size)).unwrap();
     multipart.write_text("mediatype", "pic").unwrap();
     multipart
         .write_text("uploadmediarequest", req_json)
