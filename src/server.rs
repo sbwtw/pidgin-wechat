@@ -731,8 +731,7 @@ unsafe fn upload_picture(id: usize, dest_name: &str) {
                  vec![b"Mozilla/5.0 (Windows NT 10.0; WOW64) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.110 Safari/537.36".to_vec()]);
 
-    let mut multipart = Multipart::from_request(req).unwrap();
-
+    let mut multipart = Multipart::from_request_sized(req).unwrap();
     multipart.write_text("id", "WU_FILE_0").unwrap();
     multipart.write_text("name", &img_name).unwrap();
     multipart.write_text("type", "image/png").unwrap();
