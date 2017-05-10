@@ -17,6 +17,7 @@ use self::regex::Regex;
 use self::crypto::md5::Md5;
 use self::crypto::digest::Digest;
 use self::multipart::client::Multipart;
+use self::time::Duration;
 use glib_sys;
 use libc;
 use user::User;
@@ -56,8 +57,8 @@ lazy_static!{
         let ssl = NativeTlsClient::new().unwrap();
         let connector = HttpsConnector::new(ssl);
         let mut client = Client::with_connector(connector);
-        client.set_read_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
-        client.set_write_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
+        client.set_read_timeout(Some(Duration::seconds(30).to_std().unwrap()));
+        client.set_write_timeout(Some(Duration::seconds(30).to_std().unwrap()));
 
         client
     };
@@ -815,7 +816,7 @@ pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
 
 fn check_new_message() {
 
-    let (url, data) = {
+    let (headers, url, data) = {
         let wechat = WECHAT.read().unwrap();
         let url = format!("https://web.wechat.\
                        com/cgi-bin/mmwebwx-bin/webwxsync?sid={}&skey={}&pass_ticket={}",
@@ -823,16 +824,32 @@ fn check_new_message() {
                       wechat.skey(),
                       wechat.pass_ticket());
 
-        (url, wechat.message_check_data())
+        (wechat.headers(), url, wechat.message_check_data())
     };
 
-    let result = post(&url, &data);
-    if result.is_none() {
+    let mut client = Client::with_connector(HttpsConnector::new(NativeTlsClient::new().unwrap()));
+    client.set_read_timeout(Some(Duration::seconds(5).to_std().unwrap()));
+    client.set_write_timeout(Some(Duration::seconds(5).to_std().unwrap()));
+
+    let mut response = match client
+              .post(&url)
+              .headers(headers)
+              .body(&data.to_string())
+              .send() {
+        Ok(response) => response,
+        _ => return,
+    };
+
+    if !response.status.is_success() {
+        println!("response not success, {}", response.status);
         return;
     }
 
+    let mut buf = String::new();
+    response.read_to_string(&mut buf).unwrap();
+
     // refersh sync check key
-    let json: Value = result.unwrap().parse().unwrap();
+    let json: Value = buf.parse().expect("message response parse error");
     {
         WECHAT.write().unwrap().set_sync_key(&json["SyncCheckKey"]);
     }
