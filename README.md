@@ -12,7 +12,8 @@ cargo build --release
 ```
 
 ### 编译依赖
-- libpurple-dev
+- clang
+- libpurple (developer package)
 
 > 依赖有可能未完全列出，仅在 Archlinux 系统、 nightly 的 rust 编译器下编译通过。
 
