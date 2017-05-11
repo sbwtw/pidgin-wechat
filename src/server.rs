@@ -957,10 +957,24 @@ unsafe fn refresh_chat_members(chat: &str) {
     let conv = conversion(PURPLE_CONV_TYPE_CHAT, &chat.id());
     let conv_chat = purple_conversation_get_chat_data(conv);
 
+    // clear old users
+    purple_conv_chat_clear_users(conv_chat);
+
+    // let flag = GINT_TO_POINTER(0); // PURPLE_CBFLAGS_NONE
+    let mut name_list = null_mut();
+    let mut flag_list = null_mut();
     for member in chat.members() {
-        let id = CString::new(member.user_name()).unwrap();
-        purple_conv_chat_add_user(conv_chat, id.as_ptr(), null_mut(), PURPLE_CBFLAGS_NONE, 0);
+        let data_ptr = CString::new(member.user_name()).unwrap();
+        let ptr_dup = g_strdup(data_ptr.as_ptr()) as *mut c_void;
+        name_list = g_list_append(name_list, ptr_dup);
+        flag_list = g_list_append(flag_list, null_mut());
     }
+
+    purple_conv_chat_add_users(conv_chat, name_list, null_mut(), flag_list, 0);
+
+    // free list
+    g_list_free_full(name_list, Some(g_free));
+    g_list_free_full(flag_list, Some(g_free));
 }
 
 unsafe fn add_group(chat: &ChatRoom) {
