@@ -49,21 +49,33 @@ impl MemberUser {
 impl ChatRoom {
     pub fn from_json(json: &Value) -> ChatRoom {
 
-        let mut cr = ChatRoom {
-            id: json["UserName"].as_str().unwrap().to_owned(),
-            alias: json["NickName"].as_str().unwrap().to_owned(),
+        let mut cr = ChatRoom::from_user_name(json["UserName"].as_str().unwrap());
+        cr.update(json);
+
+        cr
+    }
+
+    pub fn from_user_name(user_name: &str) -> ChatRoom {
+
+        ChatRoom {
+            id: user_name.to_owned(),
+            alias: String::new(),
             members: vec![],
 
             token: TOKEN.fetch_add(1, atomic::Ordering::SeqCst),
             ptr: Pointer::new(),
-        };
+        }
+    }
+
+    pub fn update(&mut self, json: &Value) {
+        assert_eq!(self.id, json["UserName"].as_str().unwrap());
+
+        self.alias = json["NickName"].as_str().unwrap().to_owned();
 
         let members = json["MemberList"].as_array().unwrap();
         for member in members {
-            cr.members.push(MemberUser::from_json(member));
+            self.members.push(MemberUser::from_json(member));
         }
-
-        cr
     }
 
     pub fn members(&self) -> &Vec<MemberUser> {

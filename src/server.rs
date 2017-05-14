@@ -241,10 +241,8 @@ impl WeChat {
         }
     }
 
-    fn append_chat(&mut self, chat: &ChatRoom) {
-        if self.chat_list.insert(chat.clone()) {
-            send_server_message(SrvMsg::AddGroup(chat.clone()));
-        }
+    fn append_chat(&mut self, chat: &ChatRoom) -> bool {
+        self.chat_list.insert(chat.clone())
     }
 
     fn set_chat_ptr(&mut self, chat: &ChatRoom, chat_ptr: *mut PurpleChat) {
@@ -492,7 +490,10 @@ fn check_scan(uuid: String) {
     if groups.len() != 0 {
         let mut wechat = WECHAT.write().unwrap();
         for group in *groups {
-            wechat.append_chat(&ChatRoom::from_json(group));
+            let chat = ChatRoom::from_json(group);
+            if wechat.append_chat(&chat) {
+                send_server_message(SrvMsg::AddGroup(chat.clone()));
+            }
         }
     }
 
@@ -1053,14 +1054,22 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
     }
 
     assert!(name.starts_with("@@"));
-    let token = find_chat_token(name);
+    let mut token = find_chat_token(name);
 
-    // search chat
-    let gc = (*account).gc;
-    let conv = purple_find_chat(gc, token as i32);
-    println!("purple_find_chat for token {}, result = {:?}", token, conv);
-    if conv != null_mut() {
-        return conv;
+    // invalid, create new chat
+    if token == 0 {
+        let chat = ChatRoom::from_user_name(name);
+        token = chat.token();
+        WECHAT.write().unwrap().append_chat(&chat);
+        add_group(&chat);
+    } else {
+        // search chat
+        let gc = (*account).gc;
+        let conv = purple_find_chat(gc, token as i32);
+        println!("purple_find_chat for token {}, result = {:?}", token, conv);
+        if conv != null_mut() {
+            return conv;
+        }
     }
 
     // join chat
