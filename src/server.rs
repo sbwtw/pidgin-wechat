@@ -334,9 +334,12 @@ impl WeChat {
         value
     }
 
-    fn group_info_data(&self, groups: &[String]) -> Value {
+    fn group_info_data<'a, I>(&self, groups: I) -> Value
+        where I: Iterator<Item = &'a str>
+    {
 
         let mut list = vec![];
+        let count = groups.size_hint().0;
         for id in groups {
             let item = json!({ "UserName": json!(id),
                                "ChatRoomId": json!("") });
@@ -344,7 +347,7 @@ impl WeChat {
         }
 
         let mut value = self.base_data();
-        value["Count"] = json!(groups.len());
+        value["Count"] = json!(count);
         value["List"] = json!(list);
 
         value
@@ -457,13 +460,19 @@ fn check_scan(uuid: String) {
     }
 
     let ref contact_list = json["ContactList"].as_array().unwrap();
-    let mut groups = vec![];
+    let mut groups = BTreeSet::<&str>::new();
     for contact in *contact_list {
         let name = contact["UserName"].as_str().unwrap();
         if name.starts_with("@@") {
-            groups.push(name.to_owned());
+            groups.insert(name);
         }
     }
+    for name in json["ChatSet"].as_str().unwrap().split(',') {
+        if name.starts_with("@@") {
+            groups.insert(name);
+        }
+    }
+    println!("groups {:?}", groups);
 
     // status notify
     let url = format!("https://web.wechat.\
@@ -480,12 +489,15 @@ fn check_scan(uuid: String) {
         let url = format!("https://web.wechat.com/cgi-bin/mmwebwx-bin/\
                            webwxbatchgetcontact?type=ex&r={}&pass_ticket={}",
         time_stamp(), wechat.pass_ticket());
-        let data = wechat.group_info_data(&groups[..]);
+        let data = wechat.group_info_data(groups.into_iter());
 
         (url, data)
     };
     let result = post(&url, &data);
-    let json = result.unwrap().parse::<Value>().unwrap();
+    let json = result
+        .expect("get contact failed")
+        .parse::<Value>()
+        .unwrap();
     let ref groups = json["ContactList"].as_array().unwrap();
     if groups.len() != 0 {
         let mut wechat = WECHAT.write().unwrap();
