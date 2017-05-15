@@ -977,13 +977,30 @@ unsafe fn refresh_chat_members(chat: &str) {
     let mut name_list = null_mut();
     let mut flag_list = null_mut();
     for member in chat.members() {
-        let data_ptr = CString::new(member.user_name()).unwrap();
+        // NOTE: use nick name instead of user name, because pidgin not allow nick name at chat.
+        let data_ptr = CString::new(member.nick_name().to_owned()).unwrap();
+        // let data_ptr = CString::new(member.user_name()).unwrap();
         let ptr_dup = g_strdup(data_ptr.as_ptr()) as *mut c_void;
         name_list = g_list_append(name_list, ptr_dup);
         flag_list = g_list_append(flag_list, null_mut());
     }
 
     purple_conv_chat_add_users(conv_chat, name_list, null_mut(), flag_list, 0);
+
+    // refresh nick name.
+    // for member in chat.members() {
+    //     let name = CString::new(member.user_name()).unwrap();
+    //     let cb = purple_conv_chat_cb_find(conv_chat, name.as_ptr());
+
+    //     if cb == null_mut() {
+    //         continue;
+    //     }
+
+    //     let nick = CString::new(member.nick_name()).unwrap();
+    //     let nick_dup = g_strdup(nick.as_ptr()) as *mut c_char;
+
+    //     (*cb).alias = nick_dup;
+    // }
 
     // free list
     g_list_free_full(name_list, Some(g_free));
@@ -1230,7 +1247,15 @@ unsafe fn append_text_message(msg: &Value) {
         let regex = Regex::new(r#"^(@\w+):(?:<br/>)*(.*)$"#).unwrap();
         match regex.captures(content) {
             Some(caps) => {
-                let sender = CString::new(caps.get(1).unwrap().as_str()).unwrap();
+                let sender = caps.get(1).unwrap().as_str();
+                let sender = WECHAT
+                    .read()
+                    .unwrap()
+                    .find_chat_by_token((*chat).id as usize)
+                    .unwrap()
+                    .member_nick(sender)
+                    .to_owned();
+                let sender = CString::new(sender).unwrap();
                 let content = CString::new(caps.get(2).unwrap().as_str()).unwrap();
 
                 purple_conv_chat_write(chat,

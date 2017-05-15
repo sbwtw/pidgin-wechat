@@ -34,6 +34,7 @@ pub struct MemberUser {
 
 impl MemberUser {
     fn from_json(json: &Value) -> MemberUser {
+
         MemberUser {
             user_name: json["UserName"].as_str().unwrap().to_owned(),
             nick_name: json["NickName"].as_str().unwrap().to_owned(),
@@ -41,8 +42,16 @@ impl MemberUser {
         }
     }
 
-    pub fn user_name(&self) -> String {
-        self.user_name.clone()
+    pub fn user_name(&self) -> &String {
+        &self.user_name
+    }
+
+    pub fn nick_name(&self) -> &String {
+        if self.display_name.is_empty() {
+            &self.nick_name
+        } else {
+            &self.display_name
+        }
     }
 }
 
@@ -76,6 +85,16 @@ impl ChatRoom {
         for member in members {
             self.members.push(MemberUser::from_json(member));
         }
+    }
+
+    pub fn member_nick(&self, member_name: &str) -> &String {
+        for m in &self.members {
+            if m.user_name() == member_name {
+                return m.nick_name();
+            }
+        }
+
+        unreachable!("member_nick");
     }
 
     pub fn members(&self) -> &Vec<MemberUser> {
