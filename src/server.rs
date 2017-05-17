@@ -399,17 +399,27 @@ pub fn start_login() {
 }
 
 fn check_scan(uuid: String) {
-    let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
-                      uuid,
-                      1);
-    // TODO: check result
-    let _ = get(&url);
+    let mut show_tip = 1;
+    let mut result;
 
-    let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
+    loop {
+        let url = format!("https://login.web.wechat.com/cgi-bin/mmwebwx-bin/login?uuid={}&tip={}",
                       uuid,
-                      0);
+                      show_tip);
+        result = match get(&url) {
+            Some(r) => r,
+            _ => continue,
+        };
 
-    let result = get(&url).unwrap();
+        if result.contains("window.code=200") {
+            break;
+        }
+
+        if result.contains("window.code=201") {
+            show_tip = 0;
+        }
+    }
+
     let reg = Regex::new(r#"redirect_uri="([^"]+)""#).unwrap();
     let caps = reg.captures(&result).expect("Can't find redirect uri");
     let uri = caps.get(1).unwrap().as_str();
@@ -1405,6 +1415,7 @@ fn append_purple_im_message(from: &str, dest: &str, content: &str, time: i64) {
     }
 }
 
+#[allow(dead_code)]
 fn show_message_notification(sender: &str, content: &str) {
 
     println!("show notify: {} {}", sender, content);
