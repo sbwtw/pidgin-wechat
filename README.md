@@ -2,7 +2,7 @@
 `pidgin-wechat` 是一个使用微信网页版接口和 `pidgin/libpurple` IM 框架的**第三方桌面版微信程序**的实现。目前支持联系人聊天、群聊天等功能，并支持图片消息的接收。可以运行在所有 `Pidgin` 支持的平台上(Linux, Windows, MacOS)。
 
 ## 截图
-![pidgin-wechat 截图](screenshot/2017-04-13-211409_302x579_scrot.png) 
+![pidgin-wechat 截图](screenshot/2017-04-13-211409_302x579_scrot.png)
 ![pidgin-wechat 截图](screenshot/2017-04-17-141051_887x708_scrot.png)
 
 ## 构建
@@ -34,7 +34,7 @@ cp -f libwechat.so ~/.purple/plugins/
 ## 开发进度
 - [x] 登录
 - [x] 收发文字消息
-- [x] 收发群聊天消息（Bugs: [#1](https://github.com/sbwtw/pidgin-wechat/issues/1) [#2](https://github.com/sbwtw/pidgin-wechat/issues/2)）
+- [x] 收发群聊天消息
 - [x] 接收图片消息
 - [x] 接收自定义表情
 - [ ] 发送文件与图片
@@ -43,14 +43,12 @@ cp -f libwechat.so ~/.purple/plugins/
 - [ ] 接收富文本消息
 - [ ] 接收语音消息
 - [ ] 内置表情
-- [ ] 系统级别的消息提醒
+- [ ] 系统级别的消息弹窗
 
 ## Hack
 目前遇到最多的问题是：
 - 登录失败，此时终端会输出很多 1101 字样的消息，重新登录即可，常出现在短时间重复登录。
 - 接收消息时崩溃（无新消息响应），容易在网络环境较差的时候出现，目前没有实现重传机制，需要重新登录。
-
-可以使用 `cargo build` 来生成 debug 版本的库文件，在 `target/debug/` 目录下。
 
 pidgin-wechat 的日志目前是输出到标准输出上的，可以在终端中启动 pidgin，就可以看到日志。
 
@@ -61,24 +59,16 @@ pidgin-wechat 的日志目前是输出到标准输出上的，可以在终端中
 .
 ├── Cargo.lock
 ├── Cargo.toml
-├── purple-sys                                      libpurple 接口的 codegen 目录，生成 rust-ffi 接口
-│   ├── build.rs
-│   ├── Cargo.lock
-│   ├── Cargo.toml
-│   ├── README.md
-│   ├── src
-│   │   ├── lib.rs
-│   │   └── purple.rs
-│   └── TODO.md
 ├── README.md
 ├── screenshot
 │   ├── 2017-04-13-211208_887x708_scrot.png
 │   └── 2017-04-13-211409_302x579_scrot.png
 └── src
-    ├── chatroom.rs                                 群组信息的 struct
+    ├── chatroom.rs                                 群组信息的封装
+    ├── message.rs                                  消息的封装
     ├── pointer.rs                                  一个 C raw pointer 的 wrapper
     ├── server.rs                                   核心文件，wechat 服务通讯相关的代码
-    ├── user.rs                                     用户信息的 struct
+    ├── user.rs                                     用户信息的封装
     └── wechat.rs                                   核心文件，实现 purple 接口的代码
 ```
 
