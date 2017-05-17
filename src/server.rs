@@ -37,6 +37,7 @@ use std::fs::{File, OpenOptions};
 use std::thread;
 use std::fmt::Debug;
 use std::collections::BTreeSet;
+use std::process::Command;
 
 macro_rules! cow_replace {
     ( $item:ident, $src:expr, $dest:expr ) => {
@@ -1248,6 +1249,7 @@ unsafe fn append_text_message(msg: &Value) {
         match regex.captures(content) {
             Some(caps) => {
                 let sender = caps.get(1).unwrap().as_str();
+                let content = caps.get(2).unwrap().as_str();
                 let sender = WECHAT
                     .read()
                     .unwrap()
@@ -1256,7 +1258,7 @@ unsafe fn append_text_message(msg: &Value) {
                     .member_nick(sender)
                     .to_owned();
                 let sender = CString::new(sender).unwrap();
-                let content = CString::new(caps.get(2).unwrap().as_str()).unwrap();
+                let content = CString::new(content).unwrap();
 
                 purple_conv_chat_write(chat,
                                        sender.as_ptr(),
@@ -1285,6 +1287,8 @@ unsafe fn append_text_message(msg: &Value) {
             let wechat = WECHAT.read().unwrap();
             wechat.user_name().to_owned()
         };
+
+        // show_message_notification("Pidgin", content);
 
         if self_name != src {
             let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
@@ -1399,6 +1403,17 @@ fn append_purple_im_message(from: &str, dest: &str, content: &str, time: i64) {
                                  time);
         }
     }
+}
+
+fn show_message_notification(sender: &str, content: &str) {
+
+    println!("show notify: {} {}", sender, content);
+
+    Command::new("notify-send")
+        .arg(sender)
+        .arg(content)
+        .output()
+        .unwrap();
 }
 
 fn append_message(json: &Value) {
