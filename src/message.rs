@@ -24,6 +24,7 @@ pub enum SrvMsg {
     AppendImageMessage(i32, Value),
     RefreshChatMembers(String),
     YieldEvent,
+    QuitEvent,
 }
 
 pub fn send_server_message(m: SrvMsg) {

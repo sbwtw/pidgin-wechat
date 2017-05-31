@@ -111,6 +111,11 @@ impl WeChat {
         }
     }
 
+    fn reset(&mut self) {
+        self.user_list.clear();
+        self.chat_list.clear();
+    }
+
     fn uin(&self) -> &str {
         &self.uin
     }
@@ -635,10 +640,13 @@ fn sync_check() {
     }
 
     // show logout message
-    let m = "You are already logged in other devices.\nplease logout and restart pidgin."
+    let m = "You are already logged in other devices.\nplease relogin."
         .to_owned();
     let m = SrvMsg::ShowMessageBox(m);
     send_server_message(m);
+
+    // exit main loop
+    send_server_message(SrvMsg::QuitEvent);
 }
 
 unsafe fn show_message_box(message: &str) {
@@ -704,7 +712,8 @@ unsafe fn upload_picture(id: usize, dest_name: &str) {
     println!("upload pic for ID = {}", id);
 
     let image = purple_imgstore_find_by_id(id as i32);
-    let img_name = CStr::from_ptr(purple_imgstore_get_filename(image)).to_string_lossy();
+    let img_name = CStr::from_ptr(purple_imgstore_get_filename(image))
+        .to_string_lossy();
     let img_size = purple_imgstore_get_size(image);
     let img_data = purple_imgstore_get_data(image);
 
@@ -740,20 +749,18 @@ unsafe fn upload_picture(id: usize, dest_name: &str) {
     let mut req = Request::with_connector(Method::Post,
                                           url.parse().unwrap(),
                                           &HttpsConnector::new(NativeTlsClient::new().unwrap()))
-            .unwrap();
+        .unwrap();
     req.headers_mut()
         .set_raw("Referer", vec![b"https://web.wechat.com/".to_vec()]);
     req.headers_mut()
         .set_raw("Origin", vec![b"https://web.wechat.com/".to_vec()]);
     req.headers_mut().set_raw("Accept", vec![b"*/*".to_vec()]);
-    req.headers_mut()
-        .set_raw("Accept-Language",
-                 vec![b"zh-CN,en-US;q=0.7,en;q=0.3".to_vec()]);
+    req.headers_mut().set_raw("Accept-Language",
+                              vec![b"zh-CN,en-US;q=0.7,en;q=0.3".to_vec()]);
     req.headers_mut()
         .set_raw("Accept-Encoding", vec![b"gzip, deflate, br".to_vec()]);
-    req.headers_mut()
-        .set_raw("User-Agent",
-                 vec![b"Mozilla/5.0 (Windows NT 10.0; WOW64) \
+    req.headers_mut().set_raw("User-Agent",
+                              vec![b"Mozilla/5.0 (Windows NT 10.0; WOW64) \
     AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.110 Safari/537.36".to_vec()]);
 
     let mut multipart = Multipart::from_request_sized(req).unwrap();
@@ -969,6 +976,7 @@ unsafe extern "C" fn check_srv(_: *mut c_void) -> c_int {
             SrvMsg::AppendImageMessage(id, json) => append_image_message(id, &json),
             SrvMsg::RefreshChatMembers(chat) => refresh_chat_members(&chat),
             SrvMsg::YieldEvent => break,
+            SrvMsg::QuitEvent => return 0,
         }
     }
 
@@ -1468,6 +1476,8 @@ unsafe fn add_buddy(user: &User) {
 }
 
 pub fn login() {
+
+    WECHAT.write().unwrap().reset();
 
     unsafe {
         purple_timeout_add(1000, Some(check_srv), null_mut());
