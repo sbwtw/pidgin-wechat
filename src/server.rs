@@ -1,22 +1,18 @@
 
 extern crate std;
 extern crate hyper;
-extern crate hyper_native_tls;
+extern crate reqwest;
 extern crate regex;
 extern crate time;
 extern crate crypto;
-extern crate multipart;
+extern crate serde_json;
 
-use self::hyper::Client;
-use self::hyper::client::Request;
-use self::hyper::header::{SetCookie, Cookie, Headers};
-use self::hyper::net::HttpsConnector;
-use self::hyper::method::Method;
-use self::hyper_native_tls::NativeTlsClient;
+use self::reqwest::Client;
+use self::reqwest::header::Cookie;
+use self::hyper::header::{SetCookie, Headers};
 use self::regex::Regex;
 use self::crypto::md5::Md5;
 use self::crypto::digest::Digest;
-use self::multipart::client::Multipart;
 use self::time::Duration;
 use glib_sys;
 use libc;
@@ -54,15 +50,7 @@ lazy_static!{
     // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) =
     //{let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     static ref WECHAT: RwLock<WeChat> = RwLock::new(WeChat::new());
-    static ref CLIENT: Client = {
-        let ssl = NativeTlsClient::new().unwrap();
-        let connector = HttpsConnector::new(ssl);
-        let mut client = Client::with_connector(connector);
-        client.set_read_timeout(Some(Duration::seconds(30).to_std().unwrap()));
-        client.set_write_timeout(Some(Duration::seconds(30).to_std().unwrap()));
-
-        client
-    };
+    static ref CLIENT: Client = Client::new().unwrap();
 }
 
 // #[derive(Debug)]
@@ -88,13 +76,17 @@ unsafe impl std::marker::Sync for WeChat {}
 impl WeChat {
     fn new() -> WeChat {
         let mut headers = Headers::new();
-        headers.set_raw("Cookie", vec![vec![]]);
-        headers.set_raw("ContentType",
-                        vec![b"application/json; charset=UTF-8".to_vec()]);
+        headers.set(Cookie::new());
+        headers.set_raw(
+            "ContentType",
+            vec![b"application/json; charset=UTF-8".to_vec()],
+        );
         headers.set_raw("Host", vec![b"web.wechat.com".to_vec()]);
         headers.set_raw("Referer", vec![b"https://web.wechat.com/".to_vec()]);
-        headers.set_raw("Accept",
-                        vec![b"application/json, text/plain, */*".to_vec()]);
+        headers.set_raw(
+            "Accept",
+            vec![b"application/json, text/plain, */*".to_vec()],
+        );
 
         WeChat {
             uin: String::new(),
@@ -163,11 +155,15 @@ impl WeChat {
             return None;
         }
 
-        for c in headers.unwrap().iter() {
-            let mut split = c.split('=');
+        for (k, v) in headers.unwrap().iter() {
+            // let mut split = c.split('=');
 
-            if split.next() == Some("webwx_data_ticket") {
-                return split.next();
+            // if split.next() == Some("webwx_data_ticket") {
+            // return split.next();
+            // }
+
+            if k == "webwx_data_ticket" {
+                return Some(v);
             }
         }
 
@@ -227,14 +223,21 @@ impl WeChat {
 
     fn set_cookies(&mut self, cookies: &SetCookie) {
         println!("cookies: {:?}", cookies);
-        let ref mut jar = self.headers.get_mut::<Cookie>().unwrap();
-        for c in cookies.iter() {
-            let i = c.split(';').next().unwrap();
-            assert!(!i.is_empty());
-            jar.push(i.to_owned());
+        let ref mut jar = self.headers.get_mut::<Cookie>().expect("cookie is null");
+
+        let r = Regex::new(r#"^([^=]+)=([^;]+);"#).unwrap();
+        for ref c in cookies.iter() {
+            let caps = r.captures(c).expect("cookie format error");
+            println!("{:?}", caps);
+            let k = caps.get(1).unwrap().as_str();
+            let v = caps.get(2).unwrap().as_str();
+
+            jar.append(k.to_owned(), v.to_owned());
+            // assert!(!i.is_empty());
+            // jar.push(i.to_owned());
         }
 
-        jar.remove(0);
+        // jar.remove(0);
     }
 
     fn headers(&self) -> Headers {
@@ -341,7 +344,8 @@ impl WeChat {
     }
 
     fn group_info_data<'a, I>(&self, groups: I) -> Value
-        where I: Iterator<Item = &'a str>
+    where
+        I: Iterator<Item = &'a str>,
     {
 
         let mut list = vec![];
@@ -436,11 +440,11 @@ fn check_scan(uuid: String) {
     // webwxnewloginpage
     let url = format!("{}&fun=new&version=v2", uri);
     println!("login with: {}", url);
-    let mut response = CLIENT.get(&url).send().expect("login failed");
+    let mut response = CLIENT.get(&url).unwrap().send().expect("login failed");
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     println!("login result: {}", result);
-    let cookies = response.headers.get::<SetCookie>().unwrap();
+    let cookies = response.headers().get::<SetCookie>().unwrap();
 
     let skey = regex_cap(&result, r#"<skey>(.*)</skey>"#);
     let sid = regex_cap(&result, r#"<wxsid>(.*)</wxsid>"#);
@@ -464,10 +468,9 @@ fn check_scan(uuid: String) {
                        com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}&r={}",
                       pass_ticket,
                       skey, time_stamp());
-    let json = post(&url, &data)
-        .unwrap()
-        .parse::<Value>()
-        .expect("init failed");
+    let json = post(&url, &data).unwrap().parse::<Value>().expect(
+        "init failed",
+    );
     {
         let mut wechat = WECHAT.write().unwrap();
         wechat.set_sync_key(&json["SyncKey"]);
@@ -530,10 +533,14 @@ fn check_scan(uuid: String) {
         let uname = CString::new(WECHAT.read().unwrap().user_name()).unwrap();
         let alias = CString::new(WECHAT.read().unwrap().nick_name()).unwrap();
         println!("update account info: {:?} {:?}", uname, alias);
-        purple_account_set_username(ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
-                                    uname.as_ptr());
-        purple_account_set_alias(ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
-                                 alias.as_ptr());
+        purple_account_set_username(
+            ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
+            uname.as_ptr(),
+        );
+        purple_account_set_alias(
+            ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount,
+            alias.as_ptr(),
+        );
     }
 
     // fetch contact list
@@ -578,14 +585,16 @@ fn sync_check() {
         headers.set(hrs.get::<Cookie>().unwrap().clone());
         headers.set_raw("Host", vec![b"webpush.web.wechat.com".to_vec()]);
         headers.set_raw("Accept", vec![b"*/*".to_vec()]);
-        headers.set_raw("Referer",
-                        vec![b"https://webpush.web.wechat.com/?&lang=zh_CN".to_vec()]);
+        headers.set_raw(
+            "Referer",
+            vec![b"https://webpush.web.wechat.com/?&lang=zh_CN".to_vec()],
+        );
     }
 
     println!("{:?}", headers);
 
-    let mut client = Client::with_connector(HttpsConnector::new(NativeTlsClient::new().unwrap()));
-    client.set_read_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
+    let mut client = Client::new().unwrap();
+    // client.set_read_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
 
     // let uid
     loop {
@@ -608,12 +617,12 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = match client.get(&url).headers(headers.clone()).send() {
+        let mut response = match client.get(&url).unwrap().headers(headers.clone()).send() {
             Ok(response) => response,
             Err(_) => continue,
         };
 
-        if !response.status.is_success() {
+        if !response.status().is_success() {
             continue;
         }
 
@@ -640,8 +649,7 @@ fn sync_check() {
     }
 
     // show logout message
-    let m = "You are already logged in other devices.\nplease relogin."
-        .to_owned();
+    let m = "You are already logged in other devices.\nplease relogin.".to_owned();
     let m = SrvMsg::ShowMessageBox(m);
     send_server_message(m);
 
@@ -657,32 +665,37 @@ unsafe fn show_message_box(message: &str) {
     let cancel_txt = CString::new("Cancel").unwrap();
 
     let group = purple_request_field_group_new(title.as_ptr());
-    let field = purple_request_field_new(message.as_ptr(),
-                                         message.as_ptr(),
-                                         PURPLE_REQUEST_FIELD_NONE);
+    let field = purple_request_field_new(
+        message.as_ptr(),
+        message.as_ptr(),
+        PURPLE_REQUEST_FIELD_NONE,
+    );
     purple_request_field_group_add_field(group, field);
     let fields = purple_request_fields_new();
     purple_request_fields_add_group(fields, group);
-    purple_request_fields(null_mut(), // handle
-                          title.as_ptr(), // title
-                          message.as_ptr(), // primary
-                          null_mut(), // secondary
-                          fields, // fields
-                          ok_txt.as_ptr(), // ok_text
-                          Some(ok_cb), // ok_cb
-                          cancel_txt.as_ptr(), // cancel_text
-                          None, // cancel_cb
-                          null_mut(), // account
-                          null_mut(), // who
-                          null_mut(), // conv
-                          null_mut()); // user_data
+    purple_request_fields(
+        null_mut(), // handle
+        title.as_ptr(), // title
+        message.as_ptr(), // primary
+        null_mut(), // secondary
+        fields, // fields
+        ok_txt.as_ptr(), // ok_text
+        Some(ok_cb), // ok_cb
+        cancel_txt.as_ptr(), // cancel_text
+        None, // cancel_cb
+        null_mut(), // account
+        null_mut(), // who
+        null_mut(), // conv
+        null_mut(),
+    ); // user_data
 }
 
-pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
-                                   id: i32,
-                                   msg: *const c_char,
-                                   _: PurpleMessageFlags)
-                                   -> c_int {
+pub unsafe extern "C" fn send_chat(
+    _: *mut PurpleConnection,
+    id: i32,
+    msg: *const c_char,
+    _: PurpleMessageFlags,
+) -> c_int {
 
     let msg_cstr = CStr::from_ptr(msg).to_string_lossy().into_owned();
 
@@ -694,11 +707,13 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
         let chat = purple_conversation_get_chat_data(conv);
         let self_name = CString::new(wechat.user_name()).unwrap();
 
-        purple_conv_chat_write(chat,
-                               self_name.as_ptr(),
-                               msg,
-                               PURPLE_MESSAGE_SEND,
-                               time_stamp() / 1000);
+        purple_conv_chat_write(
+            chat,
+            self_name.as_ptr(),
+            msg,
+            PURPLE_MESSAGE_SEND,
+            time_stamp() / 1000,
+        );
 
         send_message(&chat_id, &msg_cstr);
     } else {
@@ -708,83 +723,96 @@ pub unsafe extern "C" fn send_chat(_: *mut PurpleConnection,
     0
 }
 
-unsafe fn upload_picture(id: usize, dest_name: &str) {
+unsafe fn upload_picture(id: usize, _dest_name: &str) {
     println!("upload pic for ID = {}", id);
 
-    let image = purple_imgstore_find_by_id(id as i32);
-    let img_name = CStr::from_ptr(purple_imgstore_get_filename(image))
-        .to_string_lossy();
-    let img_size = purple_imgstore_get_size(image);
-    let img_data = purple_imgstore_get_data(image);
+    // let image = purple_imgstore_find_by_id(id as i32);
+    // let img_name = CStr::from_ptr(purple_imgstore_get_filename(image)).to_string_lossy();
+    // let img_size = purple_imgstore_get_size(image);
+    // let img_data = purple_imgstore_get_data(image);
 
-    let mut raw_data = Vec::<u8>::with_capacity(img_size);
-    raw_data.set_len(img_size);
-    std::ptr::copy(img_data as *const c_uchar, raw_data.as_mut_ptr(), img_size);
+    // let mut raw_data = Vec::<u8>::with_capacity(img_size);
+    // raw_data.set_len(img_size);
+    // std::ptr::copy(img_data as *const c_uchar, raw_data.as_mut_ptr(), img_size);
 
-    let mut md5 = Md5::new();
-    md5.input(&raw_data[..]);
-    let md5 = md5.result_str();
+    // let mut md5 = Md5::new();
+    // md5.input(&raw_data[..]);
+    // let md5 = md5.result_str();
 
-    let req_json = WECHAT
-        .read()
-        .unwrap()
-        .image_upload_data(img_size, &md5, dest_name);
-    let req_json = req_json.to_string();
+    // let req_json = WECHAT.read().unwrap().image_upload_data(
+    //     img_size,
+    //     &md5,
+    //     dest_name,
+    // );
+    // let req_json = req_json.to_string();
 
-    println!("filename: {}", img_name);
-    println!("filesize: {}", img_size);
-    println!("filemd5: {}", md5);
-    println!("req_json: {}", req_json);
+    // println!("filename: {}", img_name);
+    // println!("filesize: {}", img_size);
+    // println!("filemd5: {}", md5);
+    // println!("req_json: {}", req_json);
 
-    let ticket = WECHAT.read().unwrap().data_ticket().unwrap().to_owned();
-    let ticket = ticket.replace("%2B", "+");
-    let ticket = ticket.replace("%2F", "/");
-    println!("ticket = {:?}", ticket);
+    // let ticket = WECHAT.read().unwrap().data_ticket().unwrap().to_owned();
+    // let ticket = ticket.replace("%2B", "+");
+    // let ticket = ticket.replace("%2F", "/");
+    // println!("ticket = {:?}", ticket);
 
-    let pass_ticket = WECHAT.read().unwrap().pass_ticket().to_owned();
-    let pass_ticket = pass_ticket.replace("%2B", "+");
-    let pass_ticket = pass_ticket.replace("%2F", "/");
+    // let pass_ticket = WECHAT.read().unwrap().pass_ticket().to_owned();
+    // let pass_ticket = pass_ticket.replace("%2B", "+");
+    // let pass_ticket = pass_ticket.replace("%2F", "/");
 
-    let url = "https://file.web.wechat.com/cgi-bin/mmwebwx-bin/webwxuploadmedia?f=json";
-    let mut req = Request::with_connector(Method::Post,
-                                          url.parse().unwrap(),
-                                          &HttpsConnector::new(NativeTlsClient::new().unwrap()))
-        .unwrap();
-    req.headers_mut()
-        .set_raw("Referer", vec![b"https://web.wechat.com/".to_vec()]);
-    req.headers_mut()
-        .set_raw("Origin", vec![b"https://web.wechat.com/".to_vec()]);
-    req.headers_mut().set_raw("Accept", vec![b"*/*".to_vec()]);
-    req.headers_mut().set_raw("Accept-Language",
-                              vec![b"zh-CN,en-US;q=0.7,en;q=0.3".to_vec()]);
-    req.headers_mut()
-        .set_raw("Accept-Encoding", vec![b"gzip, deflate, br".to_vec()]);
-    req.headers_mut().set_raw("User-Agent",
-                              vec![b"Mozilla/5.0 (Windows NT 10.0; WOW64) \
-    AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.110 Safari/537.36".to_vec()]);
+    // let url = "https://file.web.wechat.com/cgi-bin/mmwebwx-bin/webwxuploadmedia?f=json";
+    // let mut req = Request::with_connector(
+    //     Method::Post,
+    //     url.parse().unwrap(),
+    //     &HttpsConnector::new(NativeTlsClient::new().unwrap()),
+    // ).unwrap();
+    // req.headers_mut().set_raw(
+    //     "Referer",
+    //     vec![b"https://web.wechat.com/".to_vec()],
+    // );
+    // req.headers_mut().set_raw(
+    //     "Origin",
+    //     vec![b"https://web.wechat.com/".to_vec()],
+    // );
+    // req.headers_mut().set_raw("Accept", vec![b"*/*".to_vec()]);
+    // req.headers_mut().set_raw(
+    //     "Accept-Language",
+    //     vec![b"zh-CN,en-US;q=0.7,en;q=0.3".to_vec()],
+    // );
+    // req.headers_mut().set_raw(
+    //     "Accept-Encoding",
+    //     vec![b"gzip, deflate, br".to_vec()],
+    // );
+    // req.headers_mut().set_raw(
+    //     "User-Agent",
+    //     vec![b"Mozilla/5.0 (Windows NT 10.0; WOW64) \
+    // AppleWebKit/537.36 (KHTML, like Gecko) Chrome/57.0.2987.110 Safari/537.36".to_vec()],
+    // );
 
-    let mut multipart = Multipart::from_request_sized(req).unwrap();
-    multipart.write_text("id", "WU_FILE_0").unwrap();
-    multipart.write_text("name", &img_name).unwrap();
-    multipart.write_text("type", "image/png").unwrap();
-    multipart
-        .write_text("lastModifiedDate",
-                    "Tue May 09 2017 14:21:02 GMT+0800 (CST)")
-        .unwrap();
-    multipart.write_text("size", img_size.to_string()).unwrap();
-    multipart.write_text("mediatype", "pic").unwrap();
-    multipart
-        .write_text("uploadmediarequest", req_json)
-        .unwrap();
-    multipart.write_text("webwx_data_ticket", ticket).unwrap();
-    multipart.write_text("pass_ticket", pass_ticket).unwrap();
-    multipart.write_file("filename", "/tmp/1.png").unwrap();
+    // let mut multipart = Multipart::from_request_sized(req).unwrap();
+    // multipart.write_text("id", "WU_FILE_0").unwrap();
+    // multipart.write_text("name", &img_name).unwrap();
+    // multipart.write_text("type", "image/png").unwrap();
+    // multipart
+    //     .write_text(
+    //         "lastModifiedDate",
+    //         "Tue May 09 2017 14:21:02 GMT+0800 (CST)",
+    //     )
+    //     .unwrap();
+    // multipart.write_text("size", img_size.to_string()).unwrap();
+    // multipart.write_text("mediatype", "pic").unwrap();
+    // multipart
+    //     .write_text("uploadmediarequest", req_json)
+    //     .unwrap();
+    // multipart.write_text("webwx_data_ticket", ticket).unwrap();
+    // multipart.write_text("pass_ticket", pass_ticket).unwrap();
+    // multipart.write_file("filename", "/tmp/1.png").unwrap();
 
-    let mut response = multipart.send().unwrap();
-    let mut res = String::new();
-    response.read_to_string(&mut res).unwrap();
-    println!("{}", res);
-    println!("{:?}", response);
+    // let mut response = multipart.send().unwrap();
+    // let mut res = String::new();
+    // response.read_to_string(&mut res).unwrap();
+    // println!("{}", res);
+    // println!("{:?}", response);
 }
 
 fn preprocess_send_message<'a>(msg: &'a str, dest_name: &str) -> Option<Cow<'a, str>> {
@@ -829,11 +857,12 @@ fn send_message(who: &str, msg: &str) {
     thread::spawn(move || { let _ = post(&url, &data); });
 }
 
-pub unsafe extern "C" fn send_im(_: *mut PurpleConnection,
-                                 who: *const c_char,
-                                 msg: *const c_char,
-                                 _: PurpleMessageFlags)
-                                 -> c_int {
+pub unsafe extern "C" fn send_im(
+    _: *mut PurpleConnection,
+    who: *const c_char,
+    msg: *const c_char,
+    _: PurpleMessageFlags,
+) -> c_int {
 
     let who = CStr::from_ptr(who).to_string_lossy().into_owned();
     let msg = CStr::from_ptr(msg).to_string_lossy().into_owned();
@@ -856,21 +885,23 @@ fn check_new_message() {
         (wechat.headers(), url, wechat.message_check_data())
     };
 
-    let mut client = Client::with_connector(HttpsConnector::new(NativeTlsClient::new().unwrap()));
-    client.set_read_timeout(Some(Duration::seconds(5).to_std().unwrap()));
-    client.set_write_timeout(Some(Duration::seconds(5).to_std().unwrap()));
+    // let mut client = Client::with_connector(HttpsConnector::new(NativeTlsClient::new().unwrap()));
+    // client.set_read_timeout(Some(Duration::seconds(5).to_std().unwrap()));
+    // client.set_write_timeout(Some(Duration::seconds(5).to_std().unwrap()));
+    let client = Client::new().unwrap();
 
     let mut response = match client
-              .post(&url)
-              .headers(headers)
-              .body(&data.to_string())
-              .send() {
+        .post(&url)
+        .unwrap()
+        .headers(headers)
+        .body(serde_json::to_string(&data).unwrap())
+        .send() {
         Ok(response) => response,
         _ => return,
     };
 
-    if !response.status.is_success() {
-        println!("response not success, {}", response.status);
+    if !response.status().is_success() {
+        println!("response not success, {}", response.status());
         return;
     }
 
@@ -911,7 +942,7 @@ fn get<T: AsRef<str> + Debug>(url: T) -> Option<String> {
     };
 
     println!("get: {:?}", url);
-    let mut response = match CLIENT.get(url.as_ref()).headers(headers).send() {
+    let mut response = match CLIENT.get(url.as_ref()).unwrap().headers(headers).send() {
         Ok(response) => response,
         Err(e) => {
             println!("Err: {:?}", e);
@@ -921,7 +952,7 @@ fn get<T: AsRef<str> + Debug>(url: T) -> Option<String> {
 
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    if result.len() > 500 && response.status.is_success() {
+    if result.len() > 500 && response.status().is_success() {
         println!("result: {}", &result[0..300]);
     } else {
         println!("result: {}", result);
@@ -940,10 +971,11 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> Option<String> {
              headers,
              data);
     let mut response = match CLIENT
-              .post(url.as_ref())
-              .headers(headers)
-              .body(&data.to_string())
-              .send() {
+        .post(url.as_ref())
+        .unwrap()
+        .headers(headers)
+        .body(serde_json::to_string(&data).unwrap())
+        .send() {
         Ok(response) => response,
         Err(e) => {
             println!("Err: {:?}", e);
@@ -953,7 +985,7 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> Option<String> {
 
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
-    if result.len() > 500 && response.status.is_success() {
+    if result.len() > 500 && response.status().is_success() {
         println!("result: {}", &result[0..300]);
     } else {
         println!("result: {}", result);
@@ -1030,20 +1062,25 @@ unsafe fn add_group(chat: &ChatRoom) {
 
     println!("add group: {} {}", chat.alias(), chat.token());
 
-    let free = std::mem::transmute::<unsafe extern "C" fn(*mut std::os::raw::c_void),
-                                     unsafe extern "C" fn(*mut libc::c_void)>(g_free);
+    let free = std::mem::transmute::<
+        unsafe extern "C" fn(*mut std::os::raw::c_void),
+        unsafe extern "C" fn(*mut libc::c_void),
+    >(g_free);
 
-    let hash_table = glib_sys::g_hash_table_new_full(Some(glib_sys::g_str_hash),
-                                                     Some(glib_sys::g_str_equal),
-                                                     Some(free),
-                                                     Some(free)) as
-                     *mut GHashTable;
+    let hash_table = glib_sys::g_hash_table_new_full(
+        Some(glib_sys::g_str_hash),
+        Some(glib_sys::g_str_equal),
+        Some(free),
+        Some(free),
+    ) as *mut GHashTable;
 
     let id_key = CString::new("ChatId").unwrap();
     let id = chat.id_cstring();
-    g_hash_table_insert(hash_table,
-                        g_strdup(id_key.as_ptr()) as *mut c_void,
-                        g_strdup(id.as_ptr()) as *mut c_void);
+    g_hash_table_insert(
+        hash_table,
+        g_strdup(id_key.as_ptr()) as *mut c_void,
+        g_strdup(id.as_ptr()) as *mut c_void,
+    );
 
     let account = {
         ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount
@@ -1058,8 +1095,10 @@ unsafe fn add_group(chat: &ChatRoom) {
     let group_name = CString::new("Wechat Groups").unwrap();
     let group = purple_find_group(group_name.as_ptr());
     purple_blist_add_chat(chat_ptr, group, null_mut());
-    purple_blist_node_set_flags(chat_ptr as *mut PurpleBlistNode,
-                                PURPLE_BLIST_NODE_FLAG_NO_SAVE);
+    purple_blist_node_set_flags(
+        chat_ptr as *mut PurpleBlistNode,
+        PURPLE_BLIST_NODE_FLAG_NO_SAVE,
+    );
 
     // set chat alias if not empty
     if !chat.alias().is_empty() {
@@ -1068,15 +1107,15 @@ unsafe fn add_group(chat: &ChatRoom) {
     }
 }
 
-pub unsafe extern "C" fn find_blist_chat(_: *mut PurpleAccount,
-                                         name: *const c_char)
-                                         -> *mut PurpleChat {
+pub unsafe extern "C" fn find_blist_chat(
+    _: *mut PurpleAccount,
+    name: *const c_char,
+) -> *mut PurpleChat {
     let name = CStr::from_ptr(name);
 
-    let chat_ptr = WECHAT
-        .read()
-        .unwrap()
-        .find_chat_ptr(name.to_string_lossy().to_mut());
+    let chat_ptr = WECHAT.read().unwrap().find_chat_ptr(
+        name.to_string_lossy().to_mut(),
+    );
 
     chat_ptr
 }
@@ -1123,9 +1162,11 @@ unsafe fn conversion(conv_type: PurpleConversationType, name: &str) -> *mut Purp
     // join chat
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
     println!("join chat {:?}, token = {}", name, token);
-    serv_got_joined_chat(purple_account_get_connection(account),
-                         token as i32,
-                         name_cstr.as_ptr());
+    serv_got_joined_chat(
+        purple_account_get_connection(account),
+        token as i32,
+        name_cstr.as_ptr(),
+    );
 
     // find again
     let conv = purple_find_conversation_with_account(conv_type, name_cstr.as_ptr(), account);
@@ -1144,11 +1185,11 @@ fn save_image(url: &str) -> String {
         WECHAT.read().unwrap().headers()
     };
 
-    let mut response = CLIENT.get(url).headers(headers).send().unwrap();
+    let mut response = CLIENT.get(url).unwrap().headers(headers).send().unwrap();
     let mut result = Vec::new();
     response.read_to_end(&mut result).unwrap();
 
-    println!("fetched image: {} {} {}", url, response.status, result.len());
+    println!("fetched image: {} {} {}", url, response.status(), result.len());
 
     save_file(&result)
 }
@@ -1229,11 +1270,11 @@ unsafe fn process_emoji_image(msg: &Value) {
         let mut headers = Headers::new();
         headers.set_raw("Host", vec![b"emoji.qpic.cn".to_vec()]);
 
-        let mut response = CLIENT.get(&url).headers(headers).send().unwrap();
+        let mut response = CLIENT.get(&url).unwrap().headers(headers).send().unwrap();
         let mut result = Vec::new();
         response.read_to_end(&mut result).unwrap();
 
-        println!("fetch image: {} {} {}", url, response.status, result.len());
+        println!("fetch image: {} {} {}", url, response.status(), result.len());
 
         let img_path = CString::new(save_file(&result)).unwrap();
         let img = purple_imgstore_new_from_file(img_path.as_ptr());
@@ -1278,28 +1319,34 @@ unsafe fn append_text_message(msg: &Value) {
                 let sender = CString::new(sender).unwrap();
                 let content = CString::new(content).unwrap();
 
-                purple_conv_chat_write(chat,
-                                       sender.as_ptr(),
-                                       content.as_ptr(),
-                                       PURPLE_MESSAGE_RECV,
-                                       time);
+                purple_conv_chat_write(
+                    chat,
+                    sender.as_ptr(),
+                    content.as_ptr(),
+                    PURPLE_MESSAGE_RECV,
+                    time,
+                );
             }
             None => {
-                purple_conv_chat_write(chat,
-                                       from.as_ptr(),
-                                       content_cstring.as_ptr(),
-                                       PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_SYSTEM,
-                                       time);
+                purple_conv_chat_write(
+                    chat,
+                    from.as_ptr(),
+                    content_cstring.as_ptr(),
+                    PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_SYSTEM,
+                    time,
+                );
             }
         }
     } else if dest.starts_with("@@") {
         let conv = conversion(PURPLE_CONV_TYPE_CHAT, dest);
         let chat = purple_conversation_get_chat_data(conv);
-        purple_conv_chat_write(chat,
-                               from.as_ptr(),
-                               content_cstring.as_ptr(),
-                               PURPLE_MESSAGE_SEND,
-                               time);
+        purple_conv_chat_write(
+            chat,
+            from.as_ptr(),
+            content_cstring.as_ptr(),
+            PURPLE_MESSAGE_SEND,
+            time,
+        );
     } else {
         let self_name = {
             let wechat = WECHAT.read().unwrap();
@@ -1312,19 +1359,23 @@ unsafe fn append_text_message(msg: &Value) {
             let account_ptr = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
             let gc = (*account_ptr).gc;
 
-            serv_got_im(gc,
-                        from.as_ptr(),
-                        content_cstring.as_ptr(),
-                        PURPLE_MESSAGE_RECV,
-                        time);
+            serv_got_im(
+                gc,
+                from.as_ptr(),
+                content_cstring.as_ptr(),
+                PURPLE_MESSAGE_RECV,
+                time,
+            );
         } else {
             let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
             let im = purple_conversation_get_im_data(conv);
-            purple_conv_im_write(im,
-                                 from.as_ptr(),
-                                 content_cstring.as_ptr(),
-                                 PURPLE_MESSAGE_SEND,
-                                 time);
+            purple_conv_im_write(
+                im,
+                from.as_ptr(),
+                content_cstring.as_ptr(),
+                PURPLE_MESSAGE_SEND,
+                time,
+            );
         }
     }
 }
@@ -1355,21 +1406,25 @@ fn append_purple_chat_message(from: &str, dest: &str, sender: &str, content: &st
             let conv = conversion(PURPLE_CONV_TYPE_CHAT, from);
             let chat = purple_conversation_get_chat_data(conv);
 
-            purple_conv_chat_write(chat,
-                                   sender_cstring.as_ptr(),
-                                   content_cstring.as_ptr(),
-                                   recv_flag,
-                                   time);
+            purple_conv_chat_write(
+                chat,
+                sender_cstring.as_ptr(),
+                content_cstring.as_ptr(),
+                recv_flag,
+                time,
+            );
         }
     } else if dest.starts_with("@@") {
         unsafe {
             let conv = conversion(PURPLE_CONV_TYPE_CHAT, dest);
             let chat = purple_conversation_get_chat_data(conv);
-            purple_conv_chat_write(chat,
-                                   from_cstring.as_ptr(),
-                                   content_cstring.as_ptr(),
-                                   send_flag,
-                                   time);
+            purple_conv_chat_write(
+                chat,
+                from_cstring.as_ptr(),
+                content_cstring.as_ptr(),
+                send_flag,
+                time,
+            );
         }
     }
 }
@@ -1404,21 +1459,25 @@ fn append_purple_im_message(from: &str, dest: &str, content: &str, time: i64) {
 
         unsafe {
             let gc = (*account_ptr).gc;
-            serv_got_im(gc,
-                        from_cstring.as_ptr(),
-                        content_cstring.as_ptr(),
-                        recv_flag,
-                        time);
+            serv_got_im(
+                gc,
+                from_cstring.as_ptr(),
+                content_cstring.as_ptr(),
+                recv_flag,
+                time,
+            );
         }
     } else {
         unsafe {
             let conv = conversion(PURPLE_CONV_TYPE_IM, dest);
             let im = purple_conversation_get_im_data(conv);
-            purple_conv_im_write(im,
-                                 from_cstring.as_ptr(),
-                                 content_cstring.as_ptr(),
-                                 send_flag,
-                                 time);
+            purple_conv_im_write(
+                im,
+                from_cstring.as_ptr(),
+                content_cstring.as_ptr(),
+                send_flag,
+                time,
+            );
         }
     }
 }
@@ -1469,10 +1528,12 @@ unsafe fn add_buddy(user: &User) {
 
     // set status to available
     let available = CString::new("available").unwrap();
-    purple_prpl_got_user_status(account,
-                                user_name.as_ptr(),
-                                available.as_ptr(),
-                                null_mut() as *mut c_void);
+    purple_prpl_got_user_status(
+        account,
+        user_name.as_ptr(),
+        available.as_ptr(),
+        null_mut() as *mut c_void,
+    );
 }
 
 pub fn login() {
@@ -1495,10 +1556,12 @@ pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
     let qr_image_buf = CString::from_vec_unchecked(buf);
 
     let qr_code_id = CString::new("qrcode").unwrap();
-    let qr_code_field = purple_request_field_image_new(qr_code_id.as_ptr(),
-                                                       qr_code_id.as_ptr(),
-                                                       qr_image_buf.as_ptr(),
-                                                       qr_image_size as u64);
+    let qr_code_field = purple_request_field_image_new(
+        qr_code_id.as_ptr(),
+        qr_code_id.as_ptr(),
+        qr_image_buf.as_ptr(),
+        qr_image_size as u64,
+    );
 
     let group = purple_request_field_group_new(null_mut());
     purple_request_field_group_add_field(group, qr_code_field);
@@ -1510,20 +1573,21 @@ pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
     let ok = CString::new("Ok").unwrap();
     let cancel = CString::new("Cancel").unwrap();
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
-    let verify_handle = purple_request_fields(purple_account_get_connection(account) as
-                                              *mut c_void, // handle
-                                              title.as_ptr(), // title
-                                              title.as_ptr(), // primary
-                                              null_mut(), // secondary
-                                              fields, // fields
-                                              ok.as_ptr(), // ok_text
-                                              Some(ok_cb), // ok_cb
-                                              cancel.as_ptr(), // cancel_text
-                                              None, // cancel_cb
-                                              account, // account
-                                              null_mut(), // who
-                                              null_mut(), // conv
-                                              null_mut()); // user_data
+    let verify_handle = purple_request_fields(
+        purple_account_get_connection(account) as *mut c_void, // handle
+        title.as_ptr(), // title
+        title.as_ptr(), // primary
+        null_mut(), // secondary
+        fields, // fields
+        ok.as_ptr(), // ok_text
+        Some(ok_cb), // ok_cb
+        cancel.as_ptr(), // cancel_text
+        None, // cancel_cb
+        account, // account
+        null_mut(), // who
+        null_mut(), // conv
+        null_mut(),
+    ); // user_data
 
     assert!(verify_handle != null_mut());
     let mut vh = VERIFY_HANDLE.lock().unwrap();
@@ -1531,4 +1595,3 @@ pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
 }
 
 extern "C" fn ok_cb() {}
-
