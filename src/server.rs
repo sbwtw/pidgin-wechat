@@ -22,7 +22,11 @@ use serde_json::Value;
 use serde_json::Map;
 use pointer::*;
 use purple_sys::*;
+use purple_sys::PurpleRequestType::*;
+use purple_sys::PurpleRequestFieldType::*;
+use purple_sys::PurpleConversationType::*;
 use message::*;
+
 use std::borrow::Cow;
 use std::os::raw::{c_void, c_char, c_uchar, c_int};
 use std::io::*;
@@ -711,7 +715,7 @@ pub unsafe extern "C" fn send_chat(
             chat,
             self_name.as_ptr(),
             msg,
-            PURPLE_MESSAGE_SEND,
+            PurpleMessageFlags_PURPLE_MESSAGE_SEND,
             time_stamp() / 1000,
         );
 
@@ -1097,7 +1101,7 @@ unsafe fn add_group(chat: &ChatRoom) {
     purple_blist_add_chat(chat_ptr, group, null_mut());
     purple_blist_node_set_flags(
         chat_ptr as *mut PurpleBlistNode,
-        PURPLE_BLIST_NODE_FLAG_NO_SAVE,
+        PurpleBlistNodeFlags_PURPLE_BLIST_NODE_FLAG_NO_SAVE,
     );
 
     // set chat alias if not empty
@@ -1323,7 +1327,7 @@ unsafe fn append_text_message(msg: &Value) {
                     chat,
                     sender.as_ptr(),
                     content.as_ptr(),
-                    PURPLE_MESSAGE_RECV,
+                    PurpleMessageFlags_PURPLE_MESSAGE_RECV,
                     time,
                 );
             }
@@ -1332,7 +1336,7 @@ unsafe fn append_text_message(msg: &Value) {
                     chat,
                     from.as_ptr(),
                     content_cstring.as_ptr(),
-                    PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_SYSTEM,
+                    PurpleMessageFlags_PURPLE_MESSAGE_RECV | PurpleMessageFlags_PURPLE_MESSAGE_SYSTEM,
                     time,
                 );
             }
@@ -1344,7 +1348,7 @@ unsafe fn append_text_message(msg: &Value) {
             chat,
             from.as_ptr(),
             content_cstring.as_ptr(),
-            PURPLE_MESSAGE_SEND,
+            PurpleMessageFlags_PURPLE_MESSAGE_SEND,
             time,
         );
     } else {
@@ -1363,7 +1367,7 @@ unsafe fn append_text_message(msg: &Value) {
                 gc,
                 from.as_ptr(),
                 content_cstring.as_ptr(),
-                PURPLE_MESSAGE_RECV,
+                PurpleMessageFlags_PURPLE_MESSAGE_RECV,
                 time,
             );
         } else {
@@ -1373,7 +1377,7 @@ unsafe fn append_text_message(msg: &Value) {
                 im,
                 from.as_ptr(),
                 content_cstring.as_ptr(),
-                PURPLE_MESSAGE_SEND,
+                PurpleMessageFlags_PURPLE_MESSAGE_SEND,
                 time,
             );
         }
@@ -1387,16 +1391,16 @@ fn append_purple_chat_message(from: &str, dest: &str, sender: &str, content: &st
     let has_img = content.contains("<IMG ID=");
     let send_flag = {
         if has_img {
-            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_IMAGES
+            PurpleMessageFlags_PURPLE_MESSAGE_SEND | PurpleMessageFlags_PURPLE_MESSAGE_IMAGES
         } else {
-            PURPLE_MESSAGE_SEND
+            PurpleMessageFlags_PURPLE_MESSAGE_SEND
         }
     };
     let recv_flag = {
         if has_img {
-            PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_IMAGES
+            PurpleMessageFlags_PURPLE_MESSAGE_RECV | PurpleMessageFlags_PURPLE_MESSAGE_IMAGES
         } else {
-            PURPLE_MESSAGE_RECV
+            PurpleMessageFlags_PURPLE_MESSAGE_RECV
         }
     };
 
@@ -1436,16 +1440,16 @@ fn append_purple_im_message(from: &str, dest: &str, content: &str, time: i64) {
     let has_img = content.contains("<IMG ID=");
     let send_flag = {
         if has_img {
-            PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_IMAGES
+            PurpleMessageFlags_PURPLE_MESSAGE_SEND | PurpleMessageFlags_PURPLE_MESSAGE_IMAGES
         } else {
-            PURPLE_MESSAGE_SEND
+            PurpleMessageFlags_PURPLE_MESSAGE_SEND
         }
     };
     let recv_flag = {
         if has_img {
-            PURPLE_MESSAGE_RECV | PURPLE_MESSAGE_IMAGES
+            PurpleMessageFlags_PURPLE_MESSAGE_RECV | PurpleMessageFlags_PURPLE_MESSAGE_IMAGES
         } else {
-            PURPLE_MESSAGE_RECV
+            PurpleMessageFlags_PURPLE_MESSAGE_RECV
         }
     };
 
@@ -1523,7 +1527,7 @@ unsafe fn add_buddy(user: &User) {
     let user_name = user.user_name_str();
 
     let buddy = purple_buddy_new(account, user_name.as_ptr(), user.nick_name_str().as_ptr());
-    (*buddy).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
+    (*buddy).node.flags = PurpleBlistNodeFlags_PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_buddy(buddy, null_mut(), group, null_mut());
 
     // set status to available
@@ -1554,6 +1558,7 @@ pub unsafe fn show_verify_image<T: AsRef<str>>(path: T) {
     let mut buf = Vec::new();
     let qr_image_size = qr_image.read_to_end(&mut buf).unwrap();
     let qr_image_buf = CString::from_vec_unchecked(buf);
+    println!("qr img size: {}", qr_image_size);
 
     let qr_code_id = CString::new("qrcode").unwrap();
     let qr_code_field = purple_request_field_image_new(

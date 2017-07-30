@@ -17,7 +17,12 @@ use std::ptr::null_mut;
 use std::boxed::Box;
 use std::ffi::{CString, CStr};
 use std::sync::RwLock;
+
 use purple_sys::*;
+use purple_sys::PurpleType::*;
+use purple_sys::PurpleConnectionState::*;
+use purple_sys::PurpleStatusPrimitive::*;
+use purple_sys::PurpleRoomlistFieldType::*;
 use message::*;
 use pointer::Pointer;
 use server::ACCOUNT;
@@ -35,7 +40,7 @@ lazy_static!{
 fn append_item(list: *mut GList, item: *mut c_void) -> *mut GList {
     unsafe {
         glib_sys::g_list_append(list as *mut glib_sys::GList, item as *mut libc::c_void) as
-        *mut GList
+            *mut GList
     }
 }
 
@@ -54,30 +59,34 @@ extern "C" fn status_types(_: *mut PurpleAccount) -> *mut GList {
     let nick = CString::new("nick").unwrap();
 
     let status = unsafe {
-        purple_status_type_new_with_attrs(PURPLE_STATUS_AVAILABLE,
-                                          available.as_ptr(),
-                                          available_name.as_ptr(),
-                                          TRUE,
-                                          TRUE,
-                                          FALSE,
-                                          nick.as_ptr(),
-                                          nick.as_ptr(),
-                                          purple_value_new(PURPLE_TYPE_STRING),
-                                          null_mut() as *mut c_void)
+        purple_status_type_new_with_attrs(
+            PURPLE_STATUS_AVAILABLE,
+            available.as_ptr(),
+            available_name.as_ptr(),
+            TRUE,
+            TRUE,
+            FALSE,
+            nick.as_ptr(),
+            nick.as_ptr(),
+            purple_value_new(PURPLE_TYPE_STRING),
+            null_mut() as *mut c_void,
+        )
     };
     list = append_item(list, status as *mut c_void);
 
     let status = unsafe {
-        purple_status_type_new_with_attrs(PURPLE_STATUS_OFFLINE,
-                                          offline.as_ptr(),
-                                          offline_name.as_ptr(),
-                                          TRUE,
-                                          TRUE,
-                                          FALSE,
-                                          nick.as_ptr(),
-                                          nick.as_ptr(),
-                                          purple_value_new(PURPLE_TYPE_STRING),
-                                          null_mut() as *mut c_void)
+        purple_status_type_new_with_attrs(
+            PURPLE_STATUS_OFFLINE,
+            offline.as_ptr(),
+            offline_name.as_ptr(),
+            TRUE,
+            TRUE,
+            FALSE,
+            nick.as_ptr(),
+            nick.as_ptr(),
+            purple_value_new(PURPLE_TYPE_STRING),
+            null_mut() as *mut c_void,
+        )
     };
     list = append_item(list, status as *mut c_void);
 
@@ -106,12 +115,12 @@ unsafe extern "C" fn login(account: *mut PurpleAccount) {
     // }
 
     let group = purple_group_new(WECHAT_CATEGORY.as_ptr());
-    (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
+    (*group).node.flags = PurpleBlistNodeFlags_PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
 
     let chat_group = CString::new("Wechat Groups").unwrap();
     let group = purple_group_new(chat_group.as_ptr());
-    (*group).node.flags = PURPLE_BLIST_NODE_FLAG_NO_SAVE;
+    (*group).node.flags = PurpleBlistNodeFlags_PURPLE_BLIST_NODE_FLAG_NO_SAVE;
     purple_blist_add_group(group, null_mut());
 
     std::thread::spawn(|| { server::login(); });
@@ -128,8 +137,10 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
     println!("join_chat: {:?}, {:?}", gc, components);
 
     let chat_key = CString::new("ChatId").unwrap();
-    let id = CStr::from_ptr(g_hash_table_lookup(components, chat_key.as_ptr() as *const c_void) as
-                            *const i8);
+    let id = CStr::from_ptr(g_hash_table_lookup(
+        components,
+        chat_key.as_ptr() as *const c_void,
+    ) as *const i8);
     let id_string: String = id.to_string_lossy().into_owned();
     let token = find_chat_token(&id_string);
 
@@ -137,9 +148,11 @@ unsafe extern "C" fn join_chat(gc: *mut PurpleConnection, components: *mut GHash
 
     let account = ACCOUNT.read().unwrap().as_ptr() as *mut PurpleAccount;
 
-    serv_got_joined_chat(purple_account_get_connection(account),
-                         token as i32,
-                         id.as_ptr());
+    serv_got_joined_chat(
+        purple_account_get_connection(account),
+        token as i32,
+        id.as_ptr(),
+    );
     send_server_message(SrvMsg::RefreshChatMembers(id_string));
 }
 
@@ -158,10 +171,12 @@ extern "C" fn buddy_list(gc: *mut PurpleConnection) -> *mut PurpleRoomlist {
 
     let wechat_field_name = CString::new("wechat").unwrap();
     let wechat_field = unsafe {
-        purple_roomlist_field_new(PURPLE_ROOMLIST_FIELD_STRING,
-                                  wechat_field_name.as_ptr(),
-                                  WECHAT_CATEGORY.as_ptr(),
-                                  FALSE)
+        purple_roomlist_field_new(
+            PURPLE_ROOMLIST_FIELD_STRING,
+            wechat_field_name.as_ptr(),
+            WECHAT_CATEGORY.as_ptr(),
+            FALSE,
+        )
     };
     let fields = append_item(fields, wechat_field as *mut c_void);
 
@@ -180,13 +195,15 @@ extern "C" fn callback(plugin: *mut PurplePlugin) -> i32 {
     let content = CString::new("asdasdasdasda").unwrap();
 
     unsafe {
-        purple_notify_message(plugin as *mut c_void,
-                              PurpleNotifyMsgType::PURPLE_NOTIFY_MSG_INFO,
-                              content.into_raw(),
-                              title.into_raw(),
-                              null_mut(),
-                              None,
-                              null_mut());
+        purple_notify_message(
+            plugin as *mut c_void,
+            PurpleNotifyMsgType::PURPLE_NOTIFY_MSG_INFO,
+            content.into_raw(),
+            title.into_raw(),
+            null_mut(),
+            None,
+            null_mut(),
+        );
     }
 
     TRUE
@@ -200,17 +217,21 @@ extern "C" fn action_cb(_: *mut PurplePluginAction) {
 
     unsafe {
 
-        purple_debug(PurpleDebugLevel::PURPLE_DEBUG_INFO,
-                     a.into_raw(),
-                     b.into_raw());
+        purple_debug(
+            PurpleDebugLevel::PURPLE_DEBUG_INFO,
+            a.into_raw(),
+            b.into_raw(),
+        );
 
-        purple_notify_message(PLUGIN.read().unwrap().as_ptr(),
-                              PurpleNotifyMsgType::PURPLE_NOTIFY_MSG_INFO,
-                              content.into_raw(),
-                              title.into_raw(),
-                              null_mut(),
-                              None,
-                              null_mut());
+        purple_notify_message(
+            PLUGIN.read().unwrap().as_ptr(),
+            PurpleNotifyMsgType::PURPLE_NOTIFY_MSG_INFO,
+            content.into_raw(),
+            title.into_raw(),
+            null_mut(),
+            None,
+            null_mut(),
+        );
     };
 }
 
