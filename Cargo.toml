@@ -14,7 +14,7 @@ glib-sys = "*"
 purple-sys = "*"
 lazy_static = "*"
 hyper = "*"
-reqwest = "*"
+reqwest = { git = "https://github.com/seanmonstar/reqwest" }
 regex = "*"
 serde_json = "*"
 time = "*"

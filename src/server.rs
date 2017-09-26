@@ -54,7 +54,7 @@ lazy_static!{
     // static ref CLT_MSG: (Mutex<Sender<CltMsg>>, Mutex<Receiver<CltMsg>>) =
     //{let (tx, rx) = channel(); (Mutex::new(tx), Mutex::new(rx))};
     static ref WECHAT: RwLock<WeChat> = RwLock::new(WeChat::new());
-    static ref CLIENT: Client = Client::new().unwrap();
+    static ref CLIENT: Client = Client::new();
 }
 
 // #[derive(Debug)]
@@ -444,7 +444,7 @@ fn check_scan(uuid: String) {
     // webwxnewloginpage
     let url = format!("{}&fun=new&version=v2", uri);
     println!("login with: {}", url);
-    let mut response = CLIENT.get(&url).unwrap().send().expect("login failed");
+    let mut response = CLIENT.get(&url).send().expect("login failed");
     let mut result = String::new();
     response.read_to_string(&mut result).unwrap();
     println!("login result: {}", result);
@@ -597,7 +597,7 @@ fn sync_check() {
 
     println!("{:?}", headers);
 
-    let mut client = Client::new().unwrap();
+    let mut client = Client::new();
     // client.set_read_timeout(Some(time::Duration::seconds(30).to_std().unwrap()));
 
     // let uid
@@ -621,7 +621,7 @@ fn sync_check() {
 
         println!("sync check url: {}", url);
 
-        let mut response = match client.get(&url).unwrap().headers(headers.clone()).send() {
+        let mut response = match client.get(&url).headers(headers.clone()).send() {
             Ok(response) => response,
             Err(_) => continue,
         };
@@ -892,11 +892,10 @@ fn check_new_message() {
     // let mut client = Client::with_connector(HttpsConnector::new(NativeTlsClient::new().unwrap()));
     // client.set_read_timeout(Some(Duration::seconds(5).to_std().unwrap()));
     // client.set_write_timeout(Some(Duration::seconds(5).to_std().unwrap()));
-    let client = Client::new().unwrap();
+    let client = Client::new();
 
     let mut response = match client
         .post(&url)
-        .unwrap()
         .headers(headers)
         .body(serde_json::to_string(&data).unwrap())
         .send() {
@@ -946,7 +945,7 @@ fn get<T: AsRef<str> + Debug>(url: T) -> Option<String> {
     };
 
     println!("get: {:?}", url);
-    let mut response = match CLIENT.get(url.as_ref()).unwrap().headers(headers).send() {
+    let mut response = match CLIENT.get(url.as_ref()).headers(headers).send() {
         Ok(response) => response,
         Err(e) => {
             println!("Err: {:?}", e);
@@ -976,7 +975,6 @@ fn post<U: AsRef<str> + Debug>(url: U, data: &Value) -> Option<String> {
              data);
     let mut response = match CLIENT
         .post(url.as_ref())
-        .unwrap()
         .headers(headers)
         .body(serde_json::to_string(&data).unwrap())
         .send() {
@@ -1189,7 +1187,7 @@ fn save_image(url: &str) -> String {
         WECHAT.read().unwrap().headers()
     };
 
-    let mut response = CLIENT.get(url).unwrap().headers(headers).send().unwrap();
+    let mut response = CLIENT.get(url).headers(headers).send().unwrap();
     let mut result = Vec::new();
     response.read_to_end(&mut result).unwrap();
 
@@ -1274,7 +1272,7 @@ unsafe fn process_emoji_image(msg: &Value) {
         let mut headers = Headers::new();
         headers.set_raw("Host", vec![b"emoji.qpic.cn".to_vec()]);
 
-        let mut response = CLIENT.get(&url).unwrap().headers(headers).send().unwrap();
+        let mut response = CLIENT.get(&url).headers(headers).send().unwrap();
         let mut result = Vec::new();
         response.read_to_end(&mut result).unwrap();
 
