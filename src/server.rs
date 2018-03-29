@@ -9,6 +9,7 @@ extern crate serde_json;
 
 use self::reqwest::Client;
 use self::reqwest::header::Cookie;
+use self::reqwest::multipart::Form;
 use self::hyper::header::{SetCookie, Headers};
 use self::regex::Regex;
 use self::crypto::md5::Md5;
@@ -319,20 +320,35 @@ impl WeChat {
         Value::Object(obj)
     }
 
-    fn image_upload_data(&self, img_size: usize, img_md5: &str, dest_name: &str) -> Value {
+    fn image_upload_data(&self, img_size: usize, img_md5: &str, dest_name: &str) -> String {
         let mut value = self.base_data();
 
-        value["UploadType"] = json!(2);
-        value["ClientMediaId"] = json!(time_stamp());
-        value["TotalLen"] = json!(img_size);
-        value["StartPos"] = json!(0);
-        value["DataLen"] = json!(img_size);
-        value["MediaType"] = json!(4);
-        value["FromUserName"] = json!(self.user_name());
-        value["ToUserName"] = json!(dest_name);
-        value["FileMd5"] = json!(img_md5);
+        // value["UploadType"] = json!(2);
+        // value["ClientMediaId"] = json!(time_stamp());
+        // value["TotalLen"] = json!(img_size);
+        // value["StartPos"] = json!(0);
+        // value["DataLen"] = json!(img_size);
+        // value["MediaType"] = json!(4);
+        // value["FromUserName"] = json!(self.user_name());
+        // value["ToUserName"] = json!(dest_name);
+        // value["FileMd5"] = json!(img_md5);
 
-        value
+        let mut ret = String::new();
+        ret.push_str(r#"{"UploadType":2,"BaseRequest":"#);
+        ret.push_str(&format!("{}", value["BaseRequest"].to_string()));
+        ret.push_str(r#","ClientMediaId":"#);
+        ret.push_str(&format!("{}", time_stamp()));
+        ret.push_str(r#","TotalLen":"#);
+        ret.push_str(&format!("{}", img_size));
+        ret.push_str(r#","StartPos":0,"DataLen":"#);
+        ret.push_str(&format!("{}", img_size));
+        ret.push_str(r#","MediaType":4,"FromUserName":""#);
+        ret.push_str(&format!("{}", self.user_name()));
+        ret.push_str(r#"","ToUserName":"filehelper","FileMd5":"7b85a6a526e70a994c3cc9d81426ea04"}"#);
+
+        println!("\n\n{}\n\n", ret);
+
+        ret
     }
 
     fn status_notify_data(&self) -> Value {
@@ -469,7 +485,7 @@ fn check_scan(uuid: String) {
         WECHAT.read().unwrap().base_data()
     };
     let url = format!("https://web.wechat.\
-                       com/cgi-bin/mmwebwx-bin/webwxinit?lang=zh_CN&pass_ticket={}&skey={}&r={}",
+                       com/cgi-bin/mmwebwx-bin/webwxinit?lang=en_US&pass_ticket={}&skey={}&r={}",
                       pass_ticket,
                       skey, time_stamp());
     let json = post(&url, &data).unwrap().parse::<Value>().expect(
@@ -591,7 +607,7 @@ fn sync_check() {
         headers.set_raw("Accept", vec![b"*/*".to_vec()]);
         headers.set_raw(
             "Referer",
-            vec![b"https://webpush.web.wechat.com/?&lang=zh_CN".to_vec()],
+            vec![b"https://webpush.web.wechat.com/?&lang=en_US".to_vec()],
         );
     }
 
@@ -727,13 +743,99 @@ pub unsafe extern "C" fn send_chat(
     0
 }
 
-unsafe fn upload_picture(id: usize, _dest_name: &str) {
+unsafe fn upload_picture(id: usize, dest_name: &str) {
     println!("upload pic for ID = {}", id);
 
-    // let image = purple_imgstore_find_by_id(id as i32);
-    // let img_name = CStr::from_ptr(purple_imgstore_get_filename(image)).to_string_lossy();
-    // let img_size = purple_imgstore_get_size(image);
-    // let img_data = purple_imgstore_get_data(image);
+
+    let image = purple_imgstore_find_by_id(id as i32);
+    let img_name = CStr::from_ptr(purple_imgstore_get_filename(image)).to_string_lossy();
+    let img_size = purple_imgstore_get_size(image);
+    let img_data = purple_imgstore_get_data(image);
+
+    let mut raw_data = Vec::<u8>::with_capacity(img_size);
+    raw_data.set_len(img_size);
+    std::ptr::copy(img_data as *const c_uchar, raw_data.as_mut_ptr(), img_size);
+
+    let mut md5 = Md5::new();
+    md5.input(&raw_data[..]);
+    let md5 = md5.result_str();
+
+    let req_json = WECHAT.read().unwrap().image_upload_data(
+        img_size,
+        &md5,
+        dest_name,
+    );
+    // let req_json = req_json.to_string();
+
+    let ticket = WECHAT.read().unwrap().data_ticket().unwrap().to_owned();
+    // let ticket = ticket.replace("%2B", "+");
+    // let ticket = ticket.replace("%2F", "/");
+
+    let pass_ticket = WECHAT.read().unwrap().pass_ticket().to_owned();
+    // let pass_ticket = pass_ticket.replace("%2B", "+");
+    // let pass_ticket = pass_ticket.replace("%2F", "/");
+
+    let file_path = "/home/1.jpg";
+    let form = Form::new()
+                .text("id", "WU_FILE_0")
+                .text("name", img_name.clone())
+                .text("type", "image/jpeg")
+                .text("lastModifiedDate", "Sat Jul 29 2017 22:23:15 GMT+0800 (CST)")
+                .text("size", format!("{}", img_size))
+                .text("mediatype", "pic")
+                .text("uploadmediarequest", req_json.clone())
+                .text("webwx_data_ticket", ticket.clone())
+                .text("pass_ticket", pass_ticket.clone())
+                .file("filename", file_path.clone()).unwrap();
+
+
+    let mut headers = Headers::new();
+    {
+        let hrs = WECHAT.read().unwrap().headers();
+        let mut cookie = hrs.get::<Cookie>().unwrap().clone();
+        // cookie.set("wxpluginkey", "1506386162");
+        headers.set(cookie);
+        headers.set_raw("Host", vec![b"file.web.wechat.com".to_vec()]);
+        headers.set_raw("User-Agent", vec![b"Mozilla/5.0 (X11; Linux x86_64; rv:58.0) Gecko/20100101 Firefox/58.0".to_vec()]);
+        headers.set_raw("Connection", vec![b"keep-alive".to_vec()]);
+        headers.set_raw("Accept", vec![b"*/*".to_vec()]);
+        headers.set_raw("Pragma", vec![b"no-cache".to_vec()]);
+        headers.set_raw("Accept-Language", vec![b"en-US,en;q=0.7;q=0.3".to_vec()]);
+        headers.set_raw("Accept-Encoding", vec![b"gzip, deflate, br".to_vec()]);
+        headers.set_raw("Origin", vec![b"https://web.wechat.com".to_vec()]);
+        headers.set_raw(
+            "Referer",
+            vec![b"https://web.wechat.com/".to_vec()],
+        );
+    }
+
+    let url = "https://file.web.wechat.com/cgi-bin/mmwebwx-bin/webwxuploadmedia?f=json";
+    let mut req = CLIENT.post(url);
+    let mut req = req.headers(headers.clone()).multipart(form);
+
+    println!("{:?}", req);
+    let mut response = req.send().unwrap();
+    let mut s = String::new();
+    response.read_to_string(&mut s).unwrap();
+    println!("{} {:?}", s, response);
+
+    // let form = Form::new()
+    //             .text("id", "WU_FILE_0")
+    //             .text("name", img_name)
+    //             .text("type", "image/jpeg")
+    //             .text("lastModifiedDate", "Sat Jul 29 2017 22:23:15 GMT+0800 (CST)")
+    //             .text("size", format!("{}", img_size))
+    //             .text("mediatype", "pic")
+    //             .text("uploadmediarequest", req_json)
+    //             .text("webwx_data_ticket", ticket)
+    //             .text("pass_ticket", pass_ticket)
+    //             .file("1.jpg", file_path).unwrap();
+
+    // let url = "https://file.web.wechat.com/cgi-bin/mmwebwx-bin/webwxuploadmedia?f=json";
+    // let mut response = CLIENT.post(url).headers(headers.clone()).multipart(form).send().unwrap();
+    // let mut s = String::new();
+    // response.read_to_string(&mut s).unwrap();
+    // println!("{} {:?}", s, response);
 
     // let mut raw_data = Vec::<u8>::with_capacity(img_size);
     // raw_data.set_len(img_size);
@@ -929,7 +1031,7 @@ fn regex_cap<'a>(c: &'a str, r: &str) -> &'a str {
 
 fn get_uuid() -> String {
     let url = "https://login.web.wechat.com/jslogin?appid=wx782c26e4c19acffb&redirect_uri=\
-               https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=zh_CN";
+               https://web.wechat.com/cgi-bin/mmwebwx-bin/webwxnewloginpage&fun=new&lang=en_US";
     let result = get(&url).unwrap();
 
     let reg = Regex::new(r#"uuid\s*=\s*"([-\w=]+)""#).unwrap();
