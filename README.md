@@ -1,35 +1,35 @@
 # About Pidgin-wechat
-`pidgin-wechat` is a protocol plugins for `pidgin/libpurple`, It's based on Web Wechat and support basic message receive and picture receive.
+`pidgin-wechat` is a protocol plugin for `pidgin/libpurple`. It's based on Web Wechat and supports basic message receiving and picture receiving.
 
 ## Screenshot
 ![pidgin-wechat screenshot](screenshot/2017-04-13-211409_302x579_scrot.png)
 ![pidgin-wechat screenshot](screenshot/2017-04-17-141051_887x708_scrot.png)
 
 ## Build
-You can using `cargo` to build it.
+You can use `cargo` to build it.
 ```
 cargo build --release
 ```
 
 ### Build dependencies
 - clang
-- libpurple (develop package)
+- libpurple (development package)
 
-> build depends maybe not fully listed, I have just test on Archlinux with nightly rust complier.
+> Build dependencies are maybe not fully listed. I have just tested on Archlinux with nightly rust complier.
 
-> You can download the complied binary file in [Releases](https://github.com/sbwtw/pidgin-wechat/releases/) page.
+> You can download the compiled binary file in the [Releases](https://github.com/sbwtw/pidgin-wechat/releases/) page.
 
 ## Install
-If you build using `cargo`, the binary file is placed at `target/release` or `target/debug` directory.
+If you build using `cargo`, the binary file is placed at the `target/release` or `target/debug` directory.
 
-To install this plugin, just need to copy to your plugins direcotry and restart `pidgin`.
+To install this plugin, just need to copy the binary to your plugins direcotry and restart `pidgin`.
 ```
 mkdir -p ~/.purple/plugins
 cp -f libwechat.so ~/.purple/plugins/
 ```
 
 ## Roadmap
-Now this project is still in technical validation, I need to test some wechat feature and thinking about how to implement it in pidgin.
+Now this project is still in technical validation. I need to test some wechat features and think about how to implement them in pidgin.
 
 ## Progress
 - [x] login
@@ -49,9 +49,9 @@ Now this project is still in technical validation, I need to test some wechat fe
 Most common problems:
 - login failed, you can see 1101 error code at your terminal, need to relogin.
 
-the log of `pidgin-wechat` is print into standard output, need to start pidgin in your terminal, and then you can see it.
+The log of `pidgin-wechat` is printed to the standard output. Start pidgin in your terminal, and then you can see it.
 
-if it's crashed, you can use `coredumpctl -1 info pidgin` to check core dump info, it's very useful to find out problem.(ensure you are installed coredump package)
+If it has crashed, you can use `coredumpctl -1 info pidgin` to check core dump info. It's very useful for finding out problems. (Make sure you install the coredump package)
 
 ### File list
 ```
@@ -72,11 +72,11 @@ if it's crashed, you can use `coredumpctl -1 info pidgin` to check core dump inf
 ```
 
 ## Q&A
-### Why using pidgin/libpurple?
-The version of desktop wechat implementation has already exists and maybe has modern UI, but I want to login all my IMs in same tool(like IRC, MSN, etc). so I choose pidgin because it's support a lot of chat protocol.
+### Why use pidgin/libpurple?
+The desktop wechat implementation already exists and maybe has modern UI, but I want to login to all my IMs in the same tool (like IRC, MSN, etc). I choose pidgin because it supports a lot of chat protocols.
 
 ### Is red packet/custom sticker supported?
-Not supported. because this program is base on web wechat protocol, so these feature if web wechat is not support, we can't either.
+Not supported. Because this program is base on web wechat protocol, if the web wechat doesn't support these features, we can't either.
 
 ## LICENSE
 This project is licensed under __WTFPL__.
